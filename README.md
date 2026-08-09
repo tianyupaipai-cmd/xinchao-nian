@@ -23,8 +23,22 @@ compose.yaml       两服务联合编排（共享网络、内部互通）
 .env.example       合并配置模板
 xinchao/           心潮源码（动态心智）—— MIT
 ombre-brain/       Ombre Brain 源码（记忆库）—— 见 NOTICE / LICENSE
+bridge/            心潮念 Runtime Bridge（git 子模块）—— 用户主动互动的本地连接桥
 buckets/           记忆数据卷（首启自动生成 config，重启不丢）
 ```
+
+> 含子模块，克隆用 `git clone --recursive`，或克隆后 `git submodule update --init`。
+
+## 连接桥（Runtime Bridge）
+
+`bridge/` 子模块指向独立仓库 [xinchao-runtime-bridge](https://github.com/tianyupaipai-cmd/xinchao-runtime-bridge)——
+一个**本地、可审计、拉取式**的连接工具：把用户在网页上主动发出的互动 / 便签 / 预约
+（`user_interaction` / `user_note` / `scheduled_interaction`）从心潮念平台队列拉取，注入用户自己的
+AI Runtime。梦境、余韵、思念、内部状态与 AI 自主行动**不允许**自动注入窗口——只留在心潮念里，
+用户主动回应或转成便签后才进桥。
+
+- 它是**用户本地运行**的工具，不是服务端组件，不进 `compose.yaml`。
+- 需要心潮念平台实现 `/bridge/v1/*` 服务端接口后端到端可用（服务端队列即心潮的 BridgeQueue）。
 
 ## 融合能力
 

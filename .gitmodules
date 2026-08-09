@@ -1,0 +1,3 @@
+[submodule "bridge"]
+	path = bridge
+	url = https://github.com/tianyupaipai-cmd/xinchao-runtime-bridge.git
