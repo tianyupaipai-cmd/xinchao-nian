@@ -276,8 +276,8 @@ h1{margin:0 0 8px;font-size:25px;color:#7ad7cf}.sub{margin:0 0 24px;color:#aab8c
 input{width:100%;margin:18px 0 12px;padding:13px 14px;border:1px solid #46555f;border-radius:10px;background:#0e1418;color:#fff;font-size:15px}
 button{width:100%;padding:13px;border:0;border-radius:10px;background:#65cec4;color:#09201e;font-size:15px;font-weight:700;cursor:pointer}.note{color:#75858e;font-size:12px;line-height:1.55}.error{color:#ff8c8c;font-size:13px}
 </style></head><body><main class="card">
-<h1>心潮动态心智系统</h1>
-<p class="sub">确认授权 Claude 连接你的心潮 MCP。授权只开放心潮上下文和窗口事件工具，不会接收聊天正文。</p>
+<h1>心潮念</h1>
+<p class="sub">确认授权 Claude 连接你的心潮念 MCP。授权开放心潮状态工具（上下文 / 窗口事件 / 交接便签）和 OB 记忆工具（浮现 / 沉淀 / 追溯 / 消化等），不会接收聊天正文。</p>
 <div class="meta">请求方：${clientName}<br>回调：${e(values.redirectUri)}</div>
 <form method="post" action="/oauth/authorize">
 <input type="hidden" name="client_id" value="${e(values.clientId)}">
