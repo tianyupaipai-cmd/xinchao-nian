@@ -43,7 +43,7 @@ const bridgeQueue = new BridgeQueue(config.bridge.statePath, config.bridge);
 const bridgeStreams = new Set();
 await oauth.init();
 let cyclePromise = null;
-const SYSTEM_VERSION = '2.5.8';
+const SYSTEM_VERSION = '2.5.9';
 
 function log(event, fields = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
@@ -851,6 +851,12 @@ const server = createServer(async (request, response) => {
           };
         },
         handoffNote: async (note) => saveHandoffNote(note, 'mcp'),
+        // 心潮念网关：把 OB 记忆工具经心潮同一端点暴露/转发。
+        listObTools: async () => {
+          if (!config.ombre.readEnabled) return [];
+          return ombre.listTools();
+        },
+        callOb: async (name, args) => ombre.call(name, args),
       });
       if (payload?.method === 'initialize' || payload?.method === 'tools/call') {
         log('mcp_request', {

@@ -12,6 +12,11 @@ const INTERACTION_TYPES = new Set([
   'reconciliation',
 ]);
 
+// 心潮念网关：对外暴露的 OB 记忆工具（精简集，hold/purge/restore/letter/plan 不暴露）。
+// 走代理转发到 OB；schema 在 tools/list 时动态从 OB 拉，永不漂移。
+export const OB_PROXY_TOOLS = ['breath', 'grow', 'trace', 'forget', 'dream', 'anchor', 'release', 'I', 'pulse'];
+const OB_PROXY_SET = new Set(OB_PROXY_TOOLS);
+
 export const XINCHAO_TOOLS = [
   {
     name: 'xinchao_context',
@@ -290,6 +295,13 @@ async function callTool(name, args, handlers) {
       result,
     );
   }
+  if (OB_PROXY_SET.has(name)) {
+    if (!handlers.callOb) throw new Error('OB 记忆后端未接入');
+    const raw = await handlers.callOb(name, args);
+    const payload = raw?.result ?? raw;
+    if (payload && Array.isArray(payload.content)) return payload;
+    return toolText(typeof payload === 'string' ? payload : JSON.stringify(payload ?? {}));
+  }
   throw new Error(`未知工具：${name}`);
 }
 
@@ -311,7 +323,7 @@ export async function handleMcpMessage(payload, handlers) {
         protocolVersion: requestedProtocol(params),
         capabilities: { tools: { listChanged: false } },
         serverInfo: {
-          name: 'xinchao-dynamic-mind',
+          name: '心潮念',
           title: '心潮动态心智系统',
           version: '2.4.0',
         },
@@ -328,7 +340,17 @@ export async function handleMcpMessage(payload, handlers) {
     return { status: 200, body: response(id, {}) };
   }
   if (method === 'tools/list') {
-    return { status: 200, body: response(id, { tools: XINCHAO_TOOLS }) };
+    let tools = XINCHAO_TOOLS;
+    try {
+      if (handlers.listObTools) {
+        const obTools = await handlers.listObTools();
+        const curated = (Array.isArray(obTools) ? obTools : []).filter((t) => OB_PROXY_SET.has(t?.name));
+        tools = [...XINCHAO_TOOLS, ...curated];
+      }
+    } catch (error) {
+      // OB 不可达时只暴露心潮工具，绝不让 tools/list 失败（否则连接器整个挂掉）。
+    }
+    return { status: 200, body: response(id, { tools }) };
   }
   if (method === 'tools/call') {
     try {

@@ -59,6 +59,13 @@ export class OmbreClient {
     throw new Error('Ombre MCP call failed after session refresh');
   }
 
+  // 网关用：拉 OB 的 tools/list（供心潮念合并暴露 OB 记忆工具）。
+  async listTools() {
+    await this.initialize();
+    const raw = await this.post({ jsonrpc: '2.0', id: Date.now(), method: 'tools/list', params: {} });
+    return raw?.result?.tools ?? raw?.tools ?? [];
+  }
+
   async recentMaterial(drives = []) {
     const result = await this.call('breath', {
       query: withDriveHint('近期重要记忆、情绪、关系变化和未完成事项', drives),
