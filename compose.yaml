@@ -38,9 +38,8 @@ services:
       - TUNNEL_EDGE=${TUNNEL_EDGE-region1.v2.argotunnel.com:7844,region2.v2.argotunnel.com:7844}
       - TUNNEL_TRANSPORT_PROTOCOL=${TUNNEL_TRANSPORT_PROTOCOL:-http2}
     volumes:
-      - type: bind
-        source: ${OMBRE_HOST_VAULT_DIR:-./buckets}
-        target: /app/buckets
+      # 命名卷：docker 管理权限（OB 首启在此生成 config + embeddings + 桶目录），一键部署免踩权限坑
+      - ombre-buckets:/app/buckets
     networks:
       - xinchao-nian
 
@@ -60,8 +59,10 @@ services:
     ports:
       - "127.0.0.1:18110:18110"
     volumes:
-      - ${XINCHAO_STATE_DIR:-./xinchao/state}:/app/state
-      - ${OMBRE_HOST_VAULT_DIR:-./buckets}:/ombre-buckets:ro
+      # 命名卷：心潮以 node 用户跑，bind-mount 的 host 目录 root 所有会 EACCES；命名卷由 docker
+      # 用镜像内 /app/state 的 node 所有权初始化，一键部署不需手动 chown。
+      - xinchao-state:/app/state
+      - ombre-buckets:/ombre-buckets:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -85,3 +86,7 @@ services:
 networks:
   xinchao-nian:
     driver: bridge
+
+volumes:
+  ombre-buckets:   # OB 记忆数据（config/embeddings/桶）
+  xinchao-state:   # 心潮动态状态（state.json/oauth）

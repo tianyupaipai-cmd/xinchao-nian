@@ -24,7 +24,7 @@ compose.yaml       两服务联合编排（共享网络、内部互通）
 xinchao/           心潮源码（动态心智）—— MIT
 ombre-brain/       Ombre Brain 源码（记忆库）—— 见 NOTICE / LICENSE
 bridge/            心潮念 Runtime Bridge（git 子模块）—— 用户主动互动的本地连接桥
-buckets/           记忆数据卷（首启自动生成 config，重启不丢）
+（数据用 docker 命名卷 ombre-buckets / xinchao-state，首启自动生成、重启不丢）
 ```
 
 > 含子模块，克隆用 `git clone --recursive`，或克隆后 `git submodule update --init`。
