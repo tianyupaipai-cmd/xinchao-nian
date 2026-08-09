@@ -36,6 +36,8 @@ services:
       - DYNAMIC_MIND_URL=${DYNAMIC_MIND_URL:-http://ombre-dynamic-mind:18110}
       - DYNAMIC_MIND_TOKEN=${DYNAMIC_MIND_TOKEN:-}
       - OMBRE_HOST_VAULT_DIR=${OMBRE_HOST_VAULT_DIR:-}
+      - TUNNEL_EDGE=${TUNNEL_EDGE-region1.v2.argotunnel.com:7844,region2.v2.argotunnel.com:7844}
+      - TUNNEL_TRANSPORT_PROTOCOL=${TUNNEL_TRANSPORT_PROTOCOL:-http2}
     volumes:
       - type: bind
         source: ${OMBRE_HOST_VAULT_DIR:-./buckets}
@@ -59,7 +61,7 @@ services:
     ports:
       - "127.0.0.1:18110:18110"
     volumes:
-      - ./xinchao/state:/app/state
+      - ${XINCHAO_STATE_DIR:-./xinchao/state}:/app/state
       - ${OMBRE_HOST_VAULT_DIR:-./buckets}:/ombre-buckets:ro
     read_only: true
     tmpfs:
