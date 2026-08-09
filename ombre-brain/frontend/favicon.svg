@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Ombre Brain">
+  <title>Ombre Brain</title>
+  <!-- 32x32 favicon, identical structure to icon.svg / 与 icon.svg 同构同色，缩成浏览器标签页用 -->
+  <rect x="0" y="0" width="32" height="32" rx="6" ry="6" fill="#FAF8F3"/>
+  <path d="M 16 6 A 10 10 0 0 0 16 26 Z" fill="#B85C3C"/>
+  <path d="M 16 6 A 10 10 0 0 1 16 26 Z" fill="#E8DFCC"/>
+  <g stroke="#B85C3C" stroke-width="0.8" stroke-opacity="0.7" fill="none">
+    <circle cx="16" cy="16" r="10"/>
+    <line x1="16" y1="16" x2="26" y2="16"/>
+    <line x1="16" y1="6"  x2="16" y2="26"/>
+  </g>
+</svg>

@@ -1,0 +1,35 @@
+# ============================================================
+# Ombre Brain Python 依赖
+# 安装: pip install -r requirements.txt
+# ============================================================
+
+# MCP 协议 SDK（MCP 通信核心）
+mcp>=1.0.0
+
+# 模糊匹配（记忆桶搜索）
+rapidfuzz>=3.0.0
+
+# OpenAI 兼容客户端（支持 DeepSeek/Ollama/LM Studio/vLLM/Gemini 等任意兼容 API）
+openai>=1.0.0
+
+# YAML 配置解析
+pyyaml>=6.0
+types-PyYAML>=6.0
+
+# Markdown frontmatter 解析（桶文件读写）
+python-frontmatter>=1.1.0
+
+# 异步 HTTP 客户端（应用层保活 ping）
+httpx>=0.27.0
+
+# 向量相似度计算 (导入模式/聚类)
+numpy>=1.24.0
+scikit-learn>=1.2.0
+
+# BM25 稀疏检索 + 中文分词（软依赖，缺包时自动降级）
+rank-bm25>=0.2.2
+jieba>=0.42.1
+
+# 本地 Ollama 安装包 .tar.zst 安全解压
+zstandard>=0.22.0
+

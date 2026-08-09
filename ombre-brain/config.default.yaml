@@ -1,0 +1,171 @@
+# ============================================================
+# Ombre Brain Configuration / 配置文件
+# Copy this file to config.yaml and modify as needed
+# 复制此文件为 config.yaml 后按需修改
+# ============================================================
+
+# --- Transport / 传输方式 ---
+# stdio: local use (Claude Desktop, direct pipe)
+# streamable-http: remote use (HTTP, tunnel/CDN/proxy friendly)
+# stdio: 本地使用（Claude Desktop，直接管道通信）
+# streamable-http: 远程使用（标准 HTTP，对隧道/CDN/代理友好）
+transport: "stdio"
+
+# --- Log level / 日志级别 ---
+log_level: "INFO"
+
+# --- MCP remote auth / MCP 远程鉴权开关 ---
+# true  (默认): HTTPS 连接 /mcp 时强制走 OAuth 2.1 + PKCE（Claude.ai 网页版需要）。
+# false: 完全跳过 OAuth，任何客户端（自有前端 / GPT / GLM / 自定义脚本）可免认证直连 /mcp。
+# 把 OB 接进自己的前端、调用 MCP 工具被 OAuth 卡住时，设为 false 即可。
+# 也可用环境变量 OMBRE_MCP_REQUIRE_AUTH=false 覆盖（Docker 用户更方便，优先级最高）。
+# ⚠️ 关掉后请确保服务不直接暴露公网，或在反代层另加鉴权——否则任何人都能读写记忆。
+# true (default): force OAuth 2.1 + PKCE on HTTPS /mcp connections (required by claude.ai web).
+# false: skip OAuth entirely so any client (your own frontend / GPT / GLM / custom scripts)
+#        can hit /mcp without auth. Set this when integrating OB into your own frontend and
+#        OAuth blocks your MCP tool calls. Env var OMBRE_MCP_REQUIRE_AUTH=false also works.
+# ⚠️ When disabled, do not expose the service directly to the public internet without
+#    another auth layer at the reverse proxy — otherwise anyone can read/write memories.
+mcp_require_auth: true
+
+# --- HTTP hooks auth / HTTP 钩子鉴权 ---
+# /breath-hook and /dream-hook are protected by default.
+# They accept the Dashboard login cookie, or this token via:
+#   ?token=...
+#   X-Ombre-Hook-Token: ...
+#   Authorization: Bearer ...
+# Set allow_public=true only behind another trusted auth layer.
+# /breath-hook 和 /dream-hook 默认不公开；可用 Dashboard 登录态或 token 调用。
+# 只有在反代层另有鉴权时，才建议显式打开 allow_public。
+hooks:
+  token: ""
+  allow_public: false
+
+# --- Bucket storage path / 记忆桶存储路径 ---
+# Point this to your Obsidian vault subdirectory, or any local folder
+# 指向你的 Obsidian 仓库子目录，或任意本地文件夹
+# Leave as-is to use the built-in ./buckets/ directory
+# 保持默认则使用内置的 ./buckets/ 目录
+# buckets_dir: "/path/to/your/Obsidian Vault/Ombre Brain"
+
+# Detect Markdown changes made outside OB (Obsidian / Git / manual edits).
+# Only file metadata is polled; Markdown is reparsed when a change is detected.
+storage:
+  external_change_poll_seconds: 1.0  # 0 = check every list; env: OMBRE_EXTERNAL_CHANGE_POLL_SECONDS
+
+# --- Merge threshold / 桶合并阈值 ---
+# When storing a new memory, if similarity with an existing bucket exceeds
+# this value (0-100), merge instead of creating a new one
+# 存新记忆时，如果与已有桶的相似度超过此值（0-100），则合并而非新建
+merge_threshold: 75
+
+# --- Dehydration API / 脱水压缩 API 配置 ---
+# Uses a cheap LLM for intelligent compression. API is required; if the
+# configured key/endpoint is unavailable, hold/grow will raise an explicit
+# error instead of silently degrading (see BEHAVIOR_SPEC.md 三、降级行为表).
+# 用廉价 LLM 做智能压缩。API 为必需；如 key/endpoint 不可用，
+# hold/grow 会直接报错而非静默降级（详见 BEHAVIOR_SPEC.md 三、降级行为表）。
+dehydration:
+  # Supports any OpenAI-compatible API: DeepSeek / Ollama / LM Studio / vLLM / Gemini etc.
+  # 支持所有 OpenAI 兼容 API：DeepSeek / Ollama / LM Studio / vLLM / Gemini 等
+  model: "deepseek-chat"
+  base_url: "https://api.deepseek.com/v1"
+  # Common base_url examples / 常见 base_url 示例：
+  #   DeepSeek:    https://api.deepseek.com/v1
+  #   SiliconFlow: https://api.siliconflow.cn/v1
+  #   Ollama:      http://localhost:11434/v1
+  #   LM Studio:   http://localhost:1234/v1
+  #   vLLM:        http://localhost:8000/v1
+  #   Gemini:      https://generativelanguage.googleapis.com/v1beta/openai
+  # api_key: ""    # ⚠️ Use env var OMBRE_COMPRESS_API_KEY instead / 请使用环境变量 OMBRE_COMPRESS_API_KEY
+  max_tokens: 1024
+  temperature: 0.1
+  timeout_seconds: 120             # LLM request timeout seconds / LLM 请求超时秒数
+
+# --- Decay parameters / 记忆衰减参数 ---
+# Simulates Ebbinghaus forgetting curve, auto-archives inactive memories
+# 模拟艾宾浩斯遗忘曲线，自动归档不活跃的记忆
+decay:
+  lambda: 0.05                    # Decay rate / 衰减速率（越大遗忘越快）
+  threshold: 0.3                  # Archive threshold / 归档阈值
+  check_interval_hours: 24        # Check interval (hours) / 衰减检查间隔（小时）
+  emotion_weights:
+    base: 1.0                     # Base weight / 基础权重
+    arousal_boost: 0.8            # Arousal boost coefficient / 唤醒度加成系数
+
+# --- Embedding / 向量化配置 ---
+# 使用 OpenAI 兼容的云端 API（如 Gemini）进行向量化。
+# 需要在环境变量中设置 OMBRE_EMBED_API_KEY。
+embedding:
+  enabled: true                   # Enable embedding / 启用向量化
+  background_indexing: true       # Write Markdown first; index asynchronously / 先落盘，后台生成向量
+  retry_base_seconds: 5           # First retry delay after provider failure / 首次重试等待
+  retry_max_seconds: 300          # Exponential-backoff ceiling / 指数退避上限
+  circuit_failure_threshold: 3    # Consecutive failures before global pause / 连续失败几次后熔断
+  circuit_base_seconds: 30        # First global cooldown / 首次熔断冷却
+  circuit_max_seconds: 600        # Maximum global cooldown / 最长熔断冷却
+  backend: "api"                  # 只支持 api（OpenAI 兼容端点）
+  model: "gemini-embedding-001"   # 云端模型名（如 gemini-embedding-001）
+  base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  timeout_seconds: 120             # Embedding request timeout seconds / 向量化请求超时秒数
+  # api_key: ""                   # Use OMBRE_EMBED_API_KEY / 使用 OMBRE_EMBED_API_KEY
+
+# --- Scoring weights / 检索权重参数 ---
+# total = topic(×4) + emotion(×2) + time(×1.5) + importance(×1)
+scoring_weights:
+  topic_relevance: 4.0
+  emotion_resonance: 2.0
+  time_proximity: 1.5
+  importance: 1.0
+
+# --- Fuzzy matching / 模糊匹配参数 ---
+matching:
+  fuzzy_threshold: 50             # Minimum match score (0-100) / 最低匹配分数
+  max_results: 5                  # Max results per search / 单次搜索最多返回条数
+
+# --- Surfacing defaults / 浮现默认参数 ---
+# Defaults applied when the AI calls breath() without explicit caps.
+# Front-end Settings panel writes the same fields back here.
+# AI 调用 breath() 不显式传 max_* 时使用这些默认；前端「浮现默认参数」面板会回写到这里。
+surfacing:
+  breath_max_results: 20          # 1-50, hard cap of buckets returned per breath
+  breath_max_tokens: 10000        # 500-20000, total token cap per breath
+  feel_max_tokens: 6000           # 500-20000, full-text budget for feel history; older feels collapse to one-line summaries
+  # iter 1.8: weighted sampling for breath surfacing mode（无参数浮现）
+  # 加权采样：从 top_k 候选里按 score**(1/temperature) 抽 sample_k 个，让"想起"带轻微随机性。
+  # 测试 fixture 里默认关 (enabled=false)，保证排序确定。生产可以开。
+  sampling:
+    enabled: false                # true = 启用加权采样；false = 退化为 top1+shuffle 原行为
+    top_k: 5                      # 候选池大小
+    sample_k: 2                   # 抽出几个
+    temperature: 0.7              # >1 更平均、<1 更偏向高分；0.7 是个温和的默认
+
+# --- Limits / 边界限制（iter 1.6 §5）---
+# Single-bucket size cap and pinned bucket quota. Exceeding either is
+# rejected at hold/grow/trace boundaries with a Chinese hint string.
+# 单桶字节上限 + pinned 桶数量上限。超出时在 hold/grow/trace 入口直接拒绝。
+limits:
+  max_bucket_bytes: 51200         # 50KB; 0 disables check
+  max_import_upload_bytes: 67108864  # 64MB conversation import request cap
+  max_mcp_request_bytes: 4194304  # 4MB HTTP body cap for /mcp; 0 disables
+  max_management_request_bytes: 4194304  # 4MB cap for Dashboard/OAuth mutations; large import routes use their own caps
+  max_grow_input_bytes: 2097152   # 2MB total grow source/items cap; 0 disables
+  max_query_bytes: 16384          # 16KB breath/letter query cap; 0 disables
+  max_metadata_bytes: 16384       # combined tool metadata/filter cap; 0 disables
+  max_grow_items: 100             # pre-split/digest item count cap; 0 disables
+  max_pinned: 20                  # max pinned buckets; 0 disables check
+
+# --- iter 1.9 G: 桶类型默认值 / per-type frontmatter defaults ---
+# Applied at create() time only when caller doesn't pass that field.
+# 写入时若调用方未显式传入对应字段，使用此处默认值。
+# 设计意图：letter 天然有重量、信件天然不该被静音；plan 默认中等承诺。
+bucket_type_defaults:
+  letter:
+    weight: 1.0
+    dont_surface: false
+  plan:
+    weight: 0.5
+
+# --- Deprecated: Obsidian wikilinks auto injection / 已废弃 ---
+# wikilink 自动注入已禁用；OB 只读取正文里的 [[wikilink]] 做网络图。
+# 旧版 config.yaml 中残留的 wikilink.* 配置会被忽略。

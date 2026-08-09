@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Ombre Brain logo">
+  <title>Ombre Brain</title>
+  <!-- Palette identical to dashboard.html / 调色板与前端面板一致：
+       #FAF8F3 米白 bg, #B85C3C 朱砂 accent, #E8DFCC 暖沙 surface -->
+  <rect x="0" y="0" width="512" height="512" rx="96" ry="96" fill="#FAF8F3"/>
+
+  <!-- Left half-circle (the O): cinnabar fill / 左半圆朱砂实心 = O -->
+  <path d="M 256 96 A 160 160 0 0 0 256 416 Z" fill="#B85C3C"/>
+
+  <!-- Right half-circle (the B body): warm sand fill / 右半圆暖沙实心 = B 的肚子 -->
+  <path d="M 256 96 A 160 160 0 0 1 256 416 Z" fill="#E8DFCC"/>
+
+  <!-- Outer ring + inner crossbar share stroke-width and stroke-opacity to stay visually consistent.
+       外圈轮廓与中横线使用同一组 stroke-width / stroke-opacity，避免视觉不齐 -->
+  <g stroke="#B85C3C" stroke-width="6" stroke-opacity="0.7" stroke-linecap="butt" fill="none">
+    <!-- Outer outline / 外圈描边 -->
+    <circle cx="256" cy="256" r="160"/>
+    <!-- Crossbar: from center to circle's right edge, ends exactly on the outline (x=416)
+         中横：从圆心到圆的右边界（x=416），端点正好落在外圈描边上，不超出 -->
+    <line x1="256" y1="256" x2="416" y2="256"/>
+    <!-- Vertical spine where O meets B / O 与 B 的中缝，同样的描边语义 -->
+    <line x1="256" y1="96" x2="256" y2="416"/>
+  </g>
+</svg>
