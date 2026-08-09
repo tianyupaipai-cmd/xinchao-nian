@@ -12,8 +12,9 @@
 
 services:
   ombre-brain:
-    build: ./ombre-brain
-    image: xinchao-nian/ombre-brain:local
+    # 迁移用现役镜像（零行为变化）。开源 build-from-source 路径见 ombre-brain/README（发布前补 Dockerfile+LICENSE）。
+    image: ${OMBRE_IMAGE:-guchuan/ombre-brain:breath-meta-20260807}
+    # build: ./ombre-brain   # ← 想从源码构建时取消注释、并注掉上面 image
     container_name: ombre-brain
     restart: unless-stopped
     ports:

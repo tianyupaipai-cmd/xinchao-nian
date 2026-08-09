@@ -1,0 +1,22 @@
+{
+  "name": "xinchao-dynamic-mind",
+  "version": "2.5.1",
+  "description": "Independent dynamic state engine with remote MCP, OAuth, short-term continuity and optional memory adapters.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "ai-agent",
+    "dynamic-mind",
+    "state-machine",
+    "mcp",
+    "oauth",
+    "self-hosted"
+  ]
+}

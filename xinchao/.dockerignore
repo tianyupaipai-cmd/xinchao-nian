@@ -1,0 +1,6 @@
+.env
+state
+memory-data
+test
+*.log
+.git
