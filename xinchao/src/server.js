@@ -43,7 +43,7 @@ const bridgeQueue = new BridgeQueue(config.bridge.statePath, config.bridge);
 const bridgeStreams = new Set();
 await oauth.init();
 let cyclePromise = null;
-const SYSTEM_VERSION = '2.5.9';
+const SYSTEM_VERSION = '2.5.10';
 
 function log(event, fields = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));

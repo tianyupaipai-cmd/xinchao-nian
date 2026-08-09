@@ -12,9 +12,11 @@ const INTERACTION_TYPES = new Set([
   'reconciliation',
 ]);
 
-// 心潮念网关：对外暴露的 OB 记忆工具（精简集，hold/purge/restore/letter/plan 不暴露）。
+// 心潮念网关：对外暴露的 OB 记忆工具（精简集，purge/restore/letter/plan 不暴露）。
+// hold 保留（2026-08-09 复议：hold 有了 meaning 字段能补上下文，与 grow 不冲突——
+// 日常/日记整理走 grow，重要瞬间可用 hold 但必须写 meaning）。
 // 走代理转发到 OB；schema 在 tools/list 时动态从 OB 拉，永不漂移。
-export const OB_PROXY_TOOLS = ['breath', 'grow', 'trace', 'forget', 'dream', 'anchor', 'release', 'I', 'pulse'];
+export const OB_PROXY_TOOLS = ['breath', 'hold', 'grow', 'trace', 'forget', 'dream', 'anchor', 'release', 'I', 'pulse'];
 const OB_PROXY_SET = new Set(OB_PROXY_TOOLS);
 
 export const XINCHAO_TOOLS = [
