@@ -60,10 +60,20 @@ export class OmbreClient {
   }
 
   // 网关用：拉 OB 的 tools/list（供心潮念合并暴露 OB 记忆工具）。
+  // 带会话刷新重试——OB 重启后旧 session 失效，第一次会失败；不重试的话 tools/list 会
+  // 瞬态只剩心潮 3 个工具（OB 工具消失），直到下次拉取。tools/list 只读、重试安全。
   async listTools() {
-    await this.initialize();
-    const raw = await this.post({ jsonrpc: '2.0', id: Date.now(), method: 'tools/list', params: {} });
-    return raw?.result?.tools ?? raw?.tools ?? [];
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.initialize();
+        const raw = await this.post({ jsonrpc: '2.0', id: Date.now(), method: 'tools/list', params: {} });
+        return raw?.result?.tools ?? raw?.tools ?? [];
+      } catch (error) {
+        this.sessionId = null;
+        if (attempt) throw error;
+      }
+    }
+    return [];
   }
 
   async recentMaterial(drives = []) {
