@@ -196,6 +196,44 @@ export const XINCHAO_TOOLS = [
       openWorldHint: false,
     },
   },
+  {
+    name: 'xinchao_cabin_inbox',
+    title: '读取已解锁的小屋来信',
+    description: '读取用户在小屋里明确开锁、允许 AI 查看的人类来信。上锁的信不会返回正文，也不能绕过锁读取。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'xinchao_cabin_note',
+    title: '给小屋留一封信',
+    description: '给用户的小屋留下一封自由长度的信或便签。只写你主动想留下的内容，不要复制聊天原文、密钥或技术日志。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        event_id: {
+          type: 'string',
+          minLength: 8,
+          maxLength: 120,
+          description: '本次写入的唯一标识；重试时必须复用。',
+        },
+        content: { type: 'string', minLength: 1 },
+        timestamp: { type: 'string', description: '可选 ISO 时间；通常省略并使用服务端当前时间。' },
+      },
+      required: ['event_id', 'content'],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
 ];
 
 function response(id, result) {
@@ -287,6 +325,14 @@ function handoffNoteArgs(args = {}, fallbackSessionId = '') {
   };
 }
 
+function cabinNoteArgs(args = {}) {
+  const eventId = String(args.event_id ?? '').trim().slice(0, 120);
+  if (eventId.length < 8) throw new Error('event_id 至少需要 8 个字符');
+  const content = String(args.content ?? '').trim();
+  if (!content) throw new Error('content 是必填项');
+  return { eventId, content, timestamp: args.timestamp ?? null };
+}
+
 async function callTool(name, args, handlers) {
   const fallbackSessionId = handlers.defaultSessionId ?? '';
   if (name === 'xinchao_context') {
@@ -312,6 +358,20 @@ async function callTool(name, args, handlers) {
     const duplicate = result.duplicate ? ' duplicate=true' : '';
     return toolText(
       `近期交接便签已接收：revision=${result.revision}${duplicate}`,
+      result,
+    );
+  }
+  if (name === 'xinchao_cabin_inbox') {
+    const notes = await handlers.cabinInbox();
+    const text = notes.length
+      ? notes.map((note) => `[${note.createdAt}] ${note.content}`).join('\n\n')
+      : '小屋里暂时没有已解锁、允许你阅读的来信。';
+    return toolText(text, { notes });
+  }
+  if (name === 'xinchao_cabin_note') {
+    const result = await handlers.cabinNote(cabinNoteArgs(args));
+    return toolText(
+      `小屋来信已保存：id=${result.note.id}${result.duplicate ? ' duplicate=true' : ''}`,
       result,
     );
   }
@@ -351,6 +411,7 @@ export async function handleMcpMessage(payload, handlers) {
           '新窗口开始时调用 xinchao_context；服务端会绑定当前 MCP 连接，无需自行编写 session_id。',
           '一次实际互动后可调用 xinchao_event 更新窗口短状态；event_id 必须唯一，重试时复用。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
+          '用户开锁后可用 xinchao_cabin_inbox 读取小屋来信；上锁的正文不会返回。你想给用户留话时可用 xinchao_cabin_note。',
           '只有结果明确的真实互动才填写 interaction_type；不要提交聊天正文或欲望数值。',
         ].join(''),
       }),

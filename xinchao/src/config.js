@@ -89,6 +89,11 @@ export function loadConfig() {
       ttlHours: number('BRIDGE_TTL_HOURS', 168, 1, 720),
       pollSeconds: number('BRIDGE_POLL_SECONDS', 15, 2, 300),
     },
+    cabin: {
+      statePath: process.env.CABIN_STATE_PATH ?? '/app/state/cabin.json',
+      maxNotes: number('CABIN_MAX_NOTES', 2000, 10, 10000),
+      maxLedgerEntries: number('CABIN_MAX_LEDGER_ENTRIES', 5000, 10, 20000),
+    },
     heartbeat: {
       filePath: process.env.OMBRE_HEARTBEAT_FILE ?? '/memory-data/heartbeat.json',
       // Dream residue may be shared after a shorter quiet period. Autonomous
@@ -199,7 +204,6 @@ export function validateConfig(config) {
   }
   return config;
 }
-
 
 
 

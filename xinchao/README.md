@@ -28,7 +28,7 @@
 - 默认脱敏的十二维 Dashboard Snapshot；
 - 不含正文的结构化潮汐时间线；
 - 面向网页 AI、本地 Agent、手机网页与自建后端的接入清单；
-- 独立 Dashboard 口令换取 HttpOnly 只读会话，浏览器无需接触 `SERVICE_TOKEN`；
+- 独立 Dashboard 口令换取 HttpOnly 会话，浏览器无需接触 `SERVICE_TOKEN`；状态投影只读，小屋仅开放明确的留言、锁与账本写入；
 - 独立 [`Wake Bridge`](packages/wake-bridge/) 消息信封协议，为梦境余韵、思念内容和自主行动结果预留用户/AI 双通道。
 
 接口、环境变量和前端示例见 [可视化与多终端接入地基](docs/DASHBOARD-INTEGRATION.md)。视觉主题、花瓣与梦境星云可以独立迭代，不需要重写服务端。
@@ -113,6 +113,8 @@ https://xinchao.example.com/mcp
 | `xinchao_context` | 获取当前动态短态和近期连续性；同一窗口首次启动默认只交付一次 |
 | `xinchao_event` | 回传一次明确互动及有界窗口状态；`event_id` 用于幂等 |
 | `xinchao_handoff_note` | 保存限时近期进度摘要，不保存整段聊天原文 |
+| `xinchao_cabin_inbox` | 读取用户明确开锁的小屋来信；上锁正文永不返回 |
+| `xinchao_cabin_note` | AI 主动给用户的小屋留一封信或便签 |
 
 `session_id` 是可选覆盖值。正常情况下服务端会使用 MCP 连接自带的稳定窗口 ID。
 
@@ -140,6 +142,22 @@ Authorization: Bearer <SERVICE_TOKEN>
 | `GET` | `/v1/dashboard/timeline` | 结构化变化时间线（无正文） |
 | `GET` | `/v1/dashboard/connect` | 多端接入能力清单（无凭据） |
 | `POST` | `/mcp` | Streamable HTTP MCP |
+
+### 私密小屋接口
+
+小屋数据单独写入 `CABIN_STATE_PATH`（默认 `/app/state/cabin.json`），只保存用户或 AI
+明确提交的来信和账本记录，不保存聊天原文、提示词或密钥。网页使用 Dashboard 的
+HttpOnly 会话访问：
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `GET` | `/dashboard/api/cabin` | 读取来信、未读数量、账本与汇总 |
+| `POST` / `PATCH` | `/dashboard/api/cabin/note` | 留信、标为已读、上锁或开锁 |
+| `POST` / `PATCH` / `DELETE` | `/dashboard/api/cabin/ledger` | 新增、编辑或删除账本记录 |
+
+用户来信默认上锁：连接桥只会通知 AI“有一封信”，不会携带正文。用户主动开锁后，
+AI 才能通过 `xinchao_cabin_inbox` 读取。重新上锁只会阻止之后的读取，无法撤回 AI
+已经读过的内容。
 
 ## 心跳接入档位
 
