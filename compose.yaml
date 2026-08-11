@@ -54,6 +54,8 @@ services:
     environment:
       # 心潮调 OB 走内部网络（容器名解析），不经公网
       - OMBRE_MCP_URL=${OMBRE_MCP_URL:-http://ombre-brain:8000/mcp}
+      # 同一枚内部令牌供心潮 HTTP API 鉴权和 OB sidecar 反向读取。
+      - SERVICE_TOKEN=${DYNAMIC_MIND_TOKEN}
     networks:
       - xinchao-nian
     ports:

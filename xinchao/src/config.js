@@ -76,6 +76,10 @@ export function loadConfig() {
       sessionTtlSeconds: number('DASHBOARD_SESSION_TTL_SECONDS', 43200, 900, 604800),
       includePrivateText: bool('DASHBOARD_INCLUDE_PRIVATE_TEXT', false),
       dreamLimit: number('DASHBOARD_DREAM_LIMIT', 12, 1, 30),
+      // 允许指定网页从浏览器直接读取这台心潮。默认空 = 不允许跨源请求。
+      // 多个完整来源用逗号分隔，末尾斜杠会自动归一化。
+      allowedOrigins: String(process.env.DASHBOARD_ALLOWED_ORIGINS ?? '')
+        .split(',').map((value) => value.trim().replace(/\/$/, '')).filter(Boolean),
     },
     interaction: {
       maxEffectsPerDay: number('INTERACTION_MAX_EFFECTS_PER_DAY', 24, 1, 96),
@@ -204,6 +208,5 @@ export function validateConfig(config) {
   }
   return config;
 }
-
 
 

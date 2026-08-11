@@ -140,6 +140,7 @@ Authorization: Bearer <SERVICE_TOKEN>
 | `POST` | `/v1/drive-feedback` | 管理端受控反馈接口 |
 | `GET` | `/v1/dashboard/snapshot` | 默认脱敏的可视化状态投影 |
 | `GET` | `/v1/dashboard/timeline` | 结构化变化时间线（无正文） |
+| `GET` | `/v1/dashboard/memory-map` | 从自己的 OB 读取脱敏记忆星图元数据 |
 | `GET` | `/v1/dashboard/connect` | 多端接入能力清单（无凭据） |
 | `POST` | `/mcp` | Streamable HTTP MCP |
 
@@ -152,12 +153,18 @@ HttpOnly 会话访问：
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
 | `GET` | `/dashboard/api/cabin` | 读取来信、未读数量、账本与汇总 |
+| `GET` | `/dashboard/api/snapshot` | 读取花瓣、状态与可选的真实一句话 |
+| `GET` | `/dashboard/api/memory-map` | 从这位用户自己的 OB 读取记忆星图元数据 |
 | `POST` / `PATCH` | `/dashboard/api/cabin/note` | 留信、标为已读、上锁或开锁 |
 | `POST` / `PATCH` / `DELETE` | `/dashboard/api/cabin/ledger` | 新增、编辑或删除账本记录 |
 
 用户来信默认上锁：连接桥只会通知 AI“有一封信”，不会携带正文。用户主动开锁后，
 AI 才能通过 `xinchao_cabin_inbox` 读取。重新上锁只会阻止之后的读取，无法撤回 AI
 已经读过的内容。
+
+花瓣旁的“一句话”只取自当前心潮自己的思绪池，不使用演示文案，也不会由网页猜测。
+考虑到它与梦境正文都可能包含私密内容，默认不会返回；自托管者明确设置
+`DASHBOARD_INCLUDE_PRIVATE_TEXT=true` 后，才会通过已鉴权的 Dashboard 会话展示。
 
 ## 心跳接入档位
 

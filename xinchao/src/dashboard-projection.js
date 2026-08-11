@@ -31,7 +31,7 @@ function projectedDrives(state) {
   });
 }
 
-function projectedThoughts(state) {
+function projectedThoughts(state, includePrivateText = false) {
   const flash = Array.isArray(state?.thoughtPool?.flash) ? state.thoughtPool.flash : [];
   const obsessions = Array.isArray(state?.thoughtPool?.obsessions) ? state.thoughtPool.obsessions : [];
   const signals = [...flash, ...obsessions].reduce((result, item) => {
@@ -39,6 +39,21 @@ function projectedThoughts(state) {
     result[item.key] = Math.max(result[item.key] ?? 0, clamp(item.intensity));
     return result;
   }, {});
+  const lines = includePrivateText
+    ? [...flash.map((item) => ({ ...item, kind: 'flash' })), ...obsessions.map((item) => ({ ...item, kind: 'obsession' }))]
+      .filter((item) => DRIVE_KEYS.includes(item?.key) && compact(item?.text))
+      .sort((left, right) => clamp(right.intensity) - clamp(left.intensity))
+      .reduce((result, item) => {
+        if (result.some((existing) => existing.key === item.key)) return result;
+        result.push({
+          key: item.key,
+          text: compact(item.text, 280),
+          kind: item.kind,
+          intensity: Number(clamp(item.intensity).toFixed(4)),
+        });
+        return result;
+      }, [])
+    : [];
   return {
     flashCount: flash.length,
     obsessionCount: obsessions.length,
@@ -46,6 +61,7 @@ function projectedThoughts(state) {
       key,
       intensity: Number(intensity.toFixed(4)),
     })),
+    lines,
   };
 }
 
@@ -116,7 +132,7 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
     },
     drives,
     topDrives,
-    thoughts: projectedThoughts(state),
+    thoughts: projectedThoughts(state, Boolean(config.dashboard?.includePrivateText)),
     dreams: projectedDreams(
       state,
       Boolean(config.dashboard?.includePrivateText),

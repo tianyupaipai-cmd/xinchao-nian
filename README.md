@@ -9,12 +9,40 @@
 ## 快速开始
 
 ```bash
-cp .env.example .env      # 填 3 个必填项（OB 压缩 key、Dashboard 密码、内部令牌）
+cp .env.example .env      # 填完文件内标为“必填”的密钥与独立口令
 docker compose up -d --build
 ```
 
 - OB Dashboard：`http://127.0.0.1:18001`（本机，建议再用 Nginx/隧道反代）
 - 两服务在同一 docker 网络内部通信，对外只暴露本机端口。
+
+## 连接心潮念公开可视化
+
+前提是你已经按上面的步骤部署并启动了心潮·念。`xinchaomind.uk` 是可视化
+前端，不会替你运行心潮，也无法访问另一台设备的 `localhost`。
+
+先在 `.env` 配好并重启：
+
+```env
+DASHBOARD_ENABLED=true
+DASHBOARD_ACCESS_TOKEN=一段至少32字符且与其他密钥不同的随机口令
+DASHBOARD_PUBLIC_BASE_URL=http://localhost:18110
+DASHBOARD_ALLOWED_ORIGINS=https://xinchaomind.uk
+```
+
+然后按使用场景选择：
+
+1. **网页浏览器和心潮在同一台设备**：在网页选择“我的心潮就在这台设备上”，
+   地址填 `http://127.0.0.1:18110`，口令填 `DASHBOARD_ACCESS_TOKEN`。
+2. **用手机访问电脑/主机里的心潮，或心潮跑在 VPS/N100**：先用 Cloudflare
+   Tunnel、Tailscale Funnel 或自己的反向代理给心潮配置公网 HTTPS 地址；把
+   `DASHBOARD_PUBLIC_BASE_URL` 改成该地址并重启，再在网页选择“我的心潮有公网地址”。
+
+只填到域名或端口，不要追加 `/mcp`、`/dashboard` 或 `/v1/dashboard/connect`。
+`SERVICE_TOKEN`、OB token、OAuth 口令都不能代替 Dashboard 独立口令。
+
+完整判断表、配置示例和常见错误见
+[连接公开可视化](docs/CONNECT-XINCHAOMIND.md)。
 
 ## 结构
 

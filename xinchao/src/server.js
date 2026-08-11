@@ -458,6 +458,24 @@ async function body(request) {
   return raw ? JSON.parse(raw) : {};
 }
 
+/**
+ * 只为 Dashboard 浏览器直连开放受控 CORS。
+ * 默认不放行；部署者必须把完整前端来源写入 DASHBOARD_ALLOWED_ORIGINS。
+ * 直连只使用 Authorization 会话头，不开放跨源 Cookie。
+ */
+function applyDashboardCors(request, response, url) {
+  if (!url.pathname.startsWith('/dashboard/')) return false;
+  const origin = String(request.headers.origin ?? '').replace(/\/$/, '');
+  if (!origin) return false;
+  response.setHeader('Vary', 'Origin');
+  if (!config.dashboard.allowedOrigins.includes(origin)) return false;
+  response.setHeader('Access-Control-Allow-Origin', origin);
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  response.setHeader('Access-Control-Max-Age', '600');
+  return true;
+}
+
 function send(response, status, value, extraHeaders = {}) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -771,6 +789,11 @@ function cabinLedgerInput(payload = {}) {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://localhost');
+    const corsAllowed = applyDashboardCors(request, response, url);
+    if (request.method === 'OPTIONS' && url.pathname.startsWith('/dashboard/')) {
+      response.writeHead(corsAllowed ? 204 : 403).end();
+      return;
+    }
     if (request.method === 'GET' && url.pathname === '/health') {
       return send(response, 200, {
         ok: true,
@@ -834,12 +857,17 @@ const server = createServer(async (request, response) => {
         return send(response, 401, { error: 'invalid credentials' });
       }
       const session = dashboardAuth.createSession();
-      log('dashboard_session_created', { sessionExpiresAt: session.expiresAt });
-      return send(response, 200, {
+      // 跨源直连必须由调用方显式选择 header 模式；同源模式仍只下发
+      // HttpOnly Cookie，避免普通 Dashboard 前端接触会话 token。
+      const headerMode = String(payload.mode ?? '').toLowerCase() === 'header';
+      log('dashboard_session_created', { sessionExpiresAt: session.expiresAt, headerMode });
+      const responseBody = {
         ok: true,
         expiresAt: session.expiresAt,
         profile: 'read-only-dashboard',
-      }, { 'Set-Cookie': dashboardAuth.sessionCookie(session.token) });
+      };
+      if (headerMode) return send(response, 200, { ...responseBody, token: session.token });
+      return send(response, 200, responseBody, { 'Set-Cookie': dashboardAuth.sessionCookie(session.token) });
     }
     if (url.pathname === '/dashboard/logout') {
       if (request.method !== 'POST') return send(response, 405, { error: 'method not allowed' }, { Allow: 'POST' });
@@ -1107,5 +1135,4 @@ bridgeTimer.unref();
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => server.close(() => process.exit(0)));
 }
-
 

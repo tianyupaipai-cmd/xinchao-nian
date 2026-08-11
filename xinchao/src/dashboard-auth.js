@@ -67,7 +67,10 @@ export class DashboardAuth {
 
   validateRequest(request, now = new Date()) {
     if (!this.enabled) return false;
-    const token = cookies(request.headers.cookie)[COOKIE_NAME];
+    // 同源 Dashboard 使用 HttpOnly Cookie；跨源浏览器直连使用同一枚短期会话
+    // token 的 Authorization 通道。长期 Dashboard 口令仍然只能用于换取会话。
+    const token = cookies(request.headers.cookie)[COOKIE_NAME]
+      || (request.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
     if (!token) return false;
     const expiresAt = this.sessions.get(digest(token));
     if (!expiresAt || expiresAt <= now.getTime()) {
@@ -78,7 +81,8 @@ export class DashboardAuth {
   }
 
   destroyRequestSession(request) {
-    const token = cookies(request.headers.cookie)[COOKIE_NAME];
+    const token = cookies(request.headers.cookie)[COOKIE_NAME]
+      || (request.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
     if (token) this.sessions.delete(digest(token));
   }
 
