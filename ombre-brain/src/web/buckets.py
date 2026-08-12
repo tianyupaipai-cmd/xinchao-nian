@@ -11,6 +11,7 @@ web/buckets.py — 记忆桶管理 + 设置 + 锚点 + 自我认知读取
 ========================================
 """
 
+import hmac
 import os
 import re
 import yaml
@@ -103,6 +104,36 @@ async def rename_human_in_buckets(old: str, new: str) -> dict:
 
 
 def register(mcp) -> None:
+
+    @mcp.custom_route("/api/bucket-preview/{bucket_id}", methods=["GET"])
+    async def api_bucket_preview(request: Request) -> Response:
+        """Trusted-sidecar-only short preview for the owner's memory map.
+
+        This route deliberately does not accept the dashboard cookie and never
+        returns more than seven non-empty lines.  The full dashboard detail
+        route below keeps its original, stricter browser-session boundary.
+        """
+        from starlette.responses import JSONResponse
+        configured = os.environ.get("OMBRE_MCP_SERVICE_TOKEN", "").strip()
+        auth = request.headers.get("Authorization", "")
+        supplied = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        if len(configured) < 32 or len(supplied) != len(configured) or not hmac.compare_digest(supplied, configured):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        bucket_id = str(request.path_params.get("bucket_id", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,160}", bucket_id):
+            return JSONResponse({"error": "invalid id"}, status_code=400)
+        bucket = await sh.bucket_mgr.get(bucket_id)
+        if not bucket or (bucket.get("metadata") or {}).get("deleted_at"):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        source = strip_wikilinks(str(bucket.get("content") or ""))
+        all_lines = [line.strip() for line in source.splitlines() if line.strip()]
+        lines = all_lines[:7]
+        return JSONResponse({
+            "id": str(bucket.get("id") or bucket_id),
+            "preview": "\n".join(lines)[:1400],
+            "lineCount": len(lines),
+            "truncated": len(all_lines) > len(lines),
+        })
 
     @mcp.custom_route("/api/buckets", methods=["GET"])
     async def api_buckets(request: Request) -> Response:

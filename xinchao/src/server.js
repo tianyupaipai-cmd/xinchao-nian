@@ -549,6 +549,18 @@ async function dashboardPayload(pathname, url) {
       };
     }
   }
+  if (pathname.endsWith('/memory-bucket')) {
+    const bucketId = String(url.searchParams.get('id') ?? '').trim();
+    if (!/^[A-Za-z0-9._-]{1,160}$/.test(bucketId)) {
+      return { schemaVersion: 1, available: false, reason: 'invalid_id', id: bucketId, preview: '', lineCount: 0, truncated: false };
+    }
+    try {
+      return await ombre.memoryBucketPreview(bucketId, 7);
+    } catch (error) {
+      log('dashboard_memory_bucket_failed', { bucket: auditEventFingerprint(bucketId), message: error.message });
+      return { schemaVersion: 1, available: false, reason: 'ombre_unavailable', id: bucketId, preview: '', lineCount: 0, truncated: false };
+    }
+  }
   if (pathname.endsWith('/connect')) return buildConnectionManifest(config);
   if (pathname.endsWith('/cabin')) return cabin.snapshot();
   return null;
@@ -1135,4 +1147,3 @@ bridgeTimer.unref();
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => server.close(() => process.exit(0)));
 }
-

@@ -132,6 +132,21 @@ export class OmbreClient {
     return parseMemoryMapText(extractText(result));
   }
 
+  async memoryBucketPreview(bucketId, maxLines = 7) {
+    if (!this.config.readEnabled) return emptyMemoryPreview(bucketId, 'not_configured');
+    const id = String(bucketId ?? '').trim();
+    if (!/^[A-Za-z0-9._-]{1,160}$/.test(id)) return emptyMemoryPreview(id, 'invalid_id');
+    const url = new URL(this.config.url);
+    url.pathname = `/api/bucket-preview/${encodeURIComponent(id)}`;
+    url.search = '';
+    const headers = { Accept: 'application/json', 'X-Ombre-Caller': 'dynamic-mind' };
+    if (this.config.token) headers.Authorization = `Bearer ${this.config.token}`;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+    if (response.status === 404) return emptyMemoryPreview(id, 'not_found');
+    if (!response.ok) throw new Error(`Ombre preview failed: HTTP ${response.status}`);
+    return parseMemoryPreviewText(JSON.stringify({ ok: true, ...(await response.json()) }), id, maxLines);
+  }
+
   async storeDream(dream) {
     if (!this.config.writeEnabled) return null;
     const content = [
@@ -220,6 +235,34 @@ function emptyMemoryMap(reason = 'empty') {
       timestamps: false,
     },
   };
+}
+
+function emptyMemoryPreview(id, reason = 'empty') {
+  return { schemaVersion: 1, available: false, reason, id: String(id ?? ''), preview: '', lineCount: 0, truncated: false };
+}
+
+export function parseMemoryPreviewText(raw, expectedId = '', maxLines = 7) {
+  const text = String(raw ?? '').trim();
+  if (!text) return emptyMemoryPreview(expectedId, 'empty');
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed?.ok) return emptyMemoryPreview(expectedId, String(parsed?.error || 'not_found'));
+    const id = String(parsed.id ?? expectedId).trim();
+    if (expectedId && id !== expectedId) return emptyMemoryPreview(expectedId, 'id_mismatch');
+    const lineLimit = Math.max(1, Math.min(7, Number(maxLines) || 7));
+    const preview = String(parsed.preview ?? '').split(/\r?\n/).slice(0, lineLimit).join('\n').slice(0, 1400);
+    return {
+      schemaVersion: 1,
+      available: Boolean(preview),
+      reason: preview ? undefined : 'empty',
+      id,
+      preview,
+      lineCount: preview ? preview.split(/\r?\n/).length : 0,
+      truncated: Boolean(parsed.truncated),
+    };
+  } catch {
+    return emptyMemoryPreview(expectedId, 'invalid_response');
+  }
 }
 
 function numberOrNull(value) {
@@ -399,4 +442,3 @@ export function parseMemoryMapText(raw) {
     },
   };
 }
-

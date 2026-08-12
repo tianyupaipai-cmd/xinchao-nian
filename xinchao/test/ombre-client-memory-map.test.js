@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseMemoryMapText } from '../src/ombre-client.js';
+import { parseMemoryMapText, parseMemoryPreviewText } from '../src/ombre-client.js';
 
 test('pulse text becomes a metadata-only memory map', () => {
   const result = parseMemoryMapText(`
@@ -50,4 +50,20 @@ test('structured 3.0 map preserves optional emotional stamp fields', () => {
   assert.equal(result.capabilities.driveSnapshots, true);
   assert.equal(result.capabilities.driveAffinity, true);
   assert.equal(result.capabilities.timestamps, true);
+});
+
+test('bucket preview preserves original lines but never returns more than seven', () => {
+  const source = Array.from({ length: 10 }, (_, index) => `原文第 ${index + 1} 行`).join('\n');
+  const result = parseMemoryPreviewText(JSON.stringify({ ok: true, id: 'bucket-1', preview: source, truncated: true }), 'bucket-1');
+  assert.equal(result.available, true);
+  assert.equal(result.lineCount, 7);
+  assert.equal(result.preview.split('\n').at(-1), '原文第 7 行');
+  assert.equal(result.truncated, true);
+});
+
+test('bucket preview refuses a mismatched bucket id', () => {
+  const result = parseMemoryPreviewText(JSON.stringify({ ok: true, id: 'other', preview: '不该返回' }), 'wanted');
+  assert.equal(result.available, false);
+  assert.equal(result.reason, 'id_mismatch');
+  assert.equal(result.preview, '');
 });
