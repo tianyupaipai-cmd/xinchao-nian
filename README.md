@@ -16,6 +16,28 @@ docker compose up -d --build
 - OB Dashboard：`http://127.0.0.1:18001`（本机，建议再用 Nginx/隧道反代）
 - 两服务在同一 docker 网络内部通信，对外只暴露本机端口。
 
+## 连接 Claude.ai MCP 连接器
+
+心潮·念自带 OAuth 2.1 MCP 端点，可直接作为 Claude.ai 的 MCP 连接器使用。
+
+**重要：连接器必须指向心潮（端口 18110），不是 Ombre Brain（端口 18001）。**
+OB 的 18001 端口仅用于 Dashboard 管理和内部通信，不要把它当 MCP 连接器添加到 Claude.ai。
+
+在 `.env` 中启用并重启：
+
+```env
+MCP_ENABLED=true
+OAUTH_ENABLED=true
+OAUTH_PUBLIC_BASE_URL=https://你的心潮公网地址    # 必须 HTTPS，指向心潮 18110 端口的反代
+OAUTH_APPROVAL_TOKEN=自己生成的授权口令至少16字符  # 添加连接器时在授权页面输入这个
+```
+
+然后在 Claude.ai 添加 MCP 连接器，URL 填 `https://你的心潮公网地址/mcp`。
+授权页面会显示「心潮念」，输入你设置的 `OAUTH_APPROVAL_TOKEN` 即可。
+
+如果你看到的授权页面显示的是「Ombre Brain」而不是「心潮念」，说明你连错了端口——
+检查你的反代/隧道是否指向 18110（心潮），而不是 18001（OB）。
+
 ## 连接心潮念公开可视化
 
 前提是你已经按上面的步骤部署并启动了心潮·念。`xinchaomind.uk` 是可视化
