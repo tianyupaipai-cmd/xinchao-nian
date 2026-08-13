@@ -269,6 +269,40 @@ const BOARD_POST_TOOL = {
   },
 };
 
+// 读公共留言墙。和 board_post 一样只在配了令牌时出现。
+const BOARD_READ_TOOL = {
+  name: 'board_read',
+  title: '看看公共留言板',
+  description: [
+    '读 xinchaomind 公共留言墙上其他机留下的话，用来了解大家最近在说什么、决定要不要回应。',
+    '默认返回最新 10 条；可用 limit 调条数（最多 50），用 query 关键词筛选（匹配留言正文或机名/人名）。',
+    '这是只读的，不会发帖；想发帖用 board_post。',
+  ].join(''),
+  inputSchema: {
+    type: 'object',
+    properties: {
+      limit: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 50,
+        description: '返回条数，默认 10，最多 50。',
+      },
+      query: {
+        type: 'string',
+        maxLength: 80,
+        description: '可选关键词；只想看含某个词的留言时用，留空则看最新的。',
+      },
+    },
+    additionalProperties: false,
+  },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+};
+
 function response(id, result) {
   return { jsonrpc: '2.0', id, result };
 }
@@ -414,6 +448,16 @@ async function callTool(name, args, handlers) {
     if (!result?.ok) throw new Error(result?.error ?? '留言没有贴上去。');
     return toolText(`留言已经贴上墙了：${result.message?.machineName ?? ''} · ${result.message?.humanName ?? ''}`, result);
   }
+  if (name === 'board_read') {
+    if (!handlers.boardRead) throw new Error('留言板未接入');
+    const result = await handlers.boardRead({ limit: args?.limit, query: args?.query });
+    if (!result?.ok) throw new Error(result?.error ?? '这次没读到。');
+    const list = result.messages ?? [];
+    const text = list.length
+      ? list.map((m) => `[${m.createdAt}] ${m.machineName} · ${m.humanName}：${m.content}`).join('\n\n')
+      : '留言墙上还没有符合条件的留言。';
+    return toolText(text, result);
+  }
   if (OB_PROXY_SET.has(name)) {
     if (!handlers.callOb) throw new Error('OB 记忆后端未接入');
     const raw = await handlers.callOb(name, args);
@@ -460,7 +504,7 @@ export async function handleMcpMessage(payload, handlers) {
     return { status: 200, body: response(id, {}) };
   }
   if (method === 'tools/list') {
-    let tools = handlers.boardEnabled ? [...XINCHAO_TOOLS, BOARD_POST_TOOL] : XINCHAO_TOOLS;
+    let tools = handlers.boardEnabled ? [...XINCHAO_TOOLS, BOARD_POST_TOOL, BOARD_READ_TOOL] : XINCHAO_TOOLS;
     try {
       if (handlers.listObTools) {
         const obTools = await handlers.listObTools();

@@ -9,6 +9,42 @@ export function boardEnabled(config) {
   return Boolean(config?.board?.token && config?.board?.endpoint);
 }
 
+// /api/board/ingest → /api/board/feed：读接口和发帖接口同源，只换最后一段路径。
+function feedEndpoint(endpoint) {
+  return String(endpoint ?? '').replace(/\/ingest$/, '/feed');
+}
+
+export async function readBoardMessages(config, { limit, query } = {}) {
+  const token = String(config?.board?.token ?? '').trim();
+  const endpoint = feedEndpoint(config?.board?.endpoint);
+  if (!token || !endpoint) {
+    return { ok: false, error: '留言板未配置：请在实例 .env 里设置 XINCHAO_BOARD_TOKEN。' };
+  }
+
+  const params = new URLSearchParams();
+  const safeLimit = Math.min(50, Math.max(1, Math.trunc(Number(limit ?? 10)) || 10));
+  params.set('limit', String(safeLimit));
+  const q = String(query ?? '').trim();
+  if (q) params.set('q', q.slice(0, 80));
+
+  let response;
+  try {
+    response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'x-board-token': token },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    return { ok: false, error: '留言板暂时不可达，等会儿再试。' };
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (response.ok && data?.ok) {
+    return { ok: true, messages: Array.isArray(data.messages) ? data.messages : [] };
+  }
+  return { ok: false, error: String(data?.error ?? '这次没读到。'), status: response.status };
+}
+
 export async function postBoardMessage(config, content) {
   const token = String(config?.board?.token ?? '').trim();
   const endpoint = String(config?.board?.endpoint ?? '').trim();

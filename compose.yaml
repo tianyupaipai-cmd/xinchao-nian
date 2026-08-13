@@ -44,6 +44,10 @@ services:
       - xinchao-nian
 
   dynamic-mind:
+    # 源码在 build 时打进镜像，所以改了 xinchao/src 下的代码要 `docker compose up -d --build`
+    # 才生效，光 restart 不行。如果你想改代码只 restart 就生效（省掉每次重建），可以自行把源码
+    # 目录挂进容器（例如在下面 volumes 里加 `- ./xinchao/src:/app/src:ro`），代价是容器不再自成
+    # 一体、依赖宿主目录。默认不挂，把这个取舍留给部署者按需决定。
     build: ./xinchao
     image: xinchao-nian/dynamic-mind:local
     container_name: ombre-dynamic-mind
