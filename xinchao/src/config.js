@@ -157,6 +157,12 @@ export function loadConfig() {
       cap: number('LONGING_CAP', 0.04, 0.01, 0.2),
       onsetHours: number('LONGING_ONSET_HOURS', 6, 1, 48),
       fullHours: number('LONGING_FULL_HOURS', 18, 2, 96)
+    },
+    // 公共留言板：机经 board_post 工具往 xinchaomind 的公共留言墙发帖。
+    // token 是这台机在平台上的身份凭证（网页里「取留言板令牌」拿到），没填就没这工具。
+    board: {
+      endpoint: (process.env.XINCHAO_BOARD_ENDPOINT ?? 'https://xinchaomind.uk/api/board/ingest').replace(/\/+$/, ''),
+      token: process.env.XINCHAO_BOARD_TOKEN ?? ''
     }
   };
 }

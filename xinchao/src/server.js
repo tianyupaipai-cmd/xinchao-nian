@@ -18,6 +18,7 @@ import { DashboardAuth } from './dashboard-auth.js';
 import { buildConnectionManifest, buildDashboardSnapshot } from './dashboard-projection.js';
 import { BRIDGE_SERVER_PROTOCOL, BRIDGE_STREAM_PROTOCOL, BridgeQueue } from './bridge-queue.js';
 import { CabinStore } from './cabin-store.js';
+import { boardEnabled, postBoardMessage } from './board-client.js';
 
 const config = validateConfig(loadConfig());
 if (!config.serviceToken) throw new Error('SERVICE_TOKEN is required');
@@ -1042,6 +1043,9 @@ const server = createServer(async (request, response) => {
         handoffNote: async (note) => saveHandoffNote(note, 'mcp'),
         cabinInbox: async () => cabin.unlockedUserNotes(),
         cabinNote: async (note) => cabin.addNote({ ...note, from: 'ai', locked: false }),
+        // 公共留言板：只有配了令牌才把 board_post 工具暴露出来 / 接受调用。
+        boardEnabled: boardEnabled(config),
+        boardPost: async ({ content }) => postBoardMessage(config, content),
         // 心潮念网关：把 OB 记忆工具经心潮同一端点暴露/转发。
         listObTools: async () => {
           if (!config.ombre.readEnabled) return [];
