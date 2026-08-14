@@ -13,8 +13,8 @@ cp .env.example .env      # 填完文件内标为“必填”的密钥与独立�
 docker compose up -d --build
 ```
 
-- OB Dashboard：`http://127.0.0.1:18001`（本机，建议再用 Nginx/隧道反代）
 - 两服务在同一 docker 网络内部通信，对外只暴露本机端口。
+- 可视化前端使用 [xinchaomind.uk](https://xinchaomind.uk)，不需要直接访问 OB 端口。
 
 ## 连接 Claude.ai MCP 连接器
 

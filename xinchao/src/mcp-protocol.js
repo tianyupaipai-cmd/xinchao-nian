@@ -504,14 +504,15 @@ export async function handleMcpMessage(payload, handlers) {
     return { status: 200, body: response(id, {}) };
   }
   if (method === 'tools/list') {
-    let tools = handlers.boardEnabled ? [...XINCHAO_TOOLS, BOARD_POST_TOOL, BOARD_READ_TOOL] : XINCHAO_TOOLS;
+    const boardTools = handlers.boardEnabled ? [BOARD_POST_TOOL, BOARD_READ_TOOL] : [];
+    let tools = [...XINCHAO_TOOLS, ...boardTools];
     try {
       if (handlers.listObTools) {
         const obTools = await handlers.listObTools();
         const curated = (Array.isArray(obTools) ? obTools : [])
           .filter((t) => OB_PROXY_SET.has(t?.name))
           .map(relabelOb);
-        tools = [...XINCHAO_TOOLS, ...curated];
+        tools = [...XINCHAO_TOOLS, ...boardTools, ...curated];
       }
     } catch (error) {
       // OB 不可达时只暴露心潮工具，绝不让 tools/list 失败（否则连接器整个挂掉）。
