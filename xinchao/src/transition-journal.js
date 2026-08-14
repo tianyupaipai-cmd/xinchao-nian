@@ -8,6 +8,7 @@ const SAFE_DETAIL_KEYS = new Set([
   'changed',
   'daytimeSent',
   'delivered',
+  'domains',
   'dreamCreated',
   'duplicate',
   'estimatedTokens',
