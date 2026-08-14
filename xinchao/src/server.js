@@ -16,7 +16,7 @@ import { OAuthProvider } from './oauth-provider.js';
 import { recordHandoffNote } from './handoff-notes.js';
 import { DashboardAuth } from './dashboard-auth.js';
 import { buildConnectionManifest, buildDashboardSnapshot } from './dashboard-projection.js';
-import { BRIDGE_SERVER_PROTOCOL, BRIDGE_STREAM_PROTOCOL, BridgeQueue } from './bridge-queue.js';
+import { BRIDGE_REASONS, BRIDGE_SERVER_PROTOCOL, BRIDGE_STREAM_PROTOCOL, BridgeQueue } from './bridge-queue.js';
 import { CabinStore } from './cabin-store.js';
 import { boardEnabled, postBoardMessage, readBoardMessages } from './board-client.js';
 
@@ -751,16 +751,22 @@ async function enqueueDashboardInteraction(event, result) {
 }
 
 function bridgeDeliveryFromDashboard(payload = {}, now = new Date()) {
-  const allowed = new Set(['event_id', 'eventId', 'message', 'deliver_after', 'deliverAfter']);
+  const allowed = new Set(['event_id', 'eventId', 'message', 'deliver_after', 'deliverAfter', 'reason']);
   const unexpected = Object.keys(payload).filter((key) => !allowed.has(key));
-  if (unexpected.length) throw new Error('bridge delivery only accepts event_id, message and deliver_after');
+  if (unexpected.length) throw new Error('bridge delivery only accepts event_id, message, reason and deliver_after');
   const eventId = String(payload.event_id ?? payload.eventId ?? '').trim();
   const message = String(payload.message ?? '').replace(/\s+/g, ' ').trim();
   const deliverAfter = payload.deliver_after ?? payload.deliverAfter ?? null;
   if (eventId.length < 8 || eventId.length > 120) throw new Error('event_id must contain 8 to 120 characters');
   if (!message || message.length > 1200) throw new Error('message must contain 1 to 1200 characters');
   const scheduled = deliverAfter && Date.parse(deliverAfter) > now.getTime();
-  return { eventId, message, deliverAfter, reason: scheduled ? 'scheduled_interaction' : 'user_note' };
+  // 默认沿用即时=user_note / 定时=scheduled_interaction。显式传入的 reason 若在白名单内、
+  // 且不是 scheduled_interaction，就用它（如 user_feedback —— 同样是用户主动发起的投递）。
+  const requested = String(payload.reason ?? '').trim();
+  const reason = requested && BRIDGE_REASONS.includes(requested) && requested !== 'scheduled_interaction'
+    ? requested
+    : (scheduled ? 'scheduled_interaction' : 'user_note');
+  return { eventId, message, deliverAfter, reason };
 }
 
 function handoffNoteFromHttp(payload = {}) {

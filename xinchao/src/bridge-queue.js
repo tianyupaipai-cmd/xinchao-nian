@@ -4,7 +4,7 @@ import { StateStore } from './state-store.js';
 export const BRIDGE_SERVER_PROTOCOL = 'xinchao-bridge-server/1';
 export const BRIDGE_STREAM_PROTOCOL = 'xinchao-bridge-stream/1';
 export const BRIDGE_RUNTIME_PROTOCOL = 'xinchao-runtime-wake/1';
-export const BRIDGE_REASONS = Object.freeze(['user_interaction', 'user_note', 'scheduled_interaction']);
+export const BRIDGE_REASONS = Object.freeze(['user_interaction', 'user_note', 'scheduled_interaction', 'user_feedback']);
 
 const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{5,159}$/;
 
