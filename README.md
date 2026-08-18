@@ -63,6 +63,11 @@ DASHBOARD_ALLOWED_ORIGINS=https://xinchaomind.uk
 只填到域名或端口，不要追加 `/mcp`、`/dashboard` 或 `/v1/dashboard/connect`。
 `SERVICE_TOKEN`、OB token、OAuth 口令都不能代替 Dashboard 独立口令。
 
+> **常见问题：网页端显示"未接入 OB / 记忆星图不可用"。**
+> 这几乎都是 `OMBRE_READ_ENABLED` 没打开——它默认 `false`，跟 OB 是否真的部署成功、能否连接是两回事。
+> 接了 OB 想在网页看记忆星图，务必在 `.env` 设 `OMBRE_READ_ENABLED=true` 并重启容器
+> （联合部署 compose 已默认开好）。配了 `OMBRE_MCP_URL` 却没开 read 时，启动日志也会打一条告警提醒。
+
 完整判断表、配置示例和常见错误见
 [连接公开可视化](docs/CONNECT-XINCHAOMIND.md)。
 

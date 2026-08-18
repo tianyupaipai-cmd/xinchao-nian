@@ -168,6 +168,17 @@ export function loadConfig() {
 }
 
 export function validateConfig(config) {
+  // 常见踩坑：配了 OB 地址却没打开 read —— OB 明明部署好了，网页端（xinchaomind.uk）
+  // 却一直显示"未接入 OB / 记忆星图不可用"。这不是报错（标准部署可以没有 OB），
+  // 但配了地址却没开 read 几乎一定是漏配，所以在这里明确告警，省得反复排查。
+  if (String(config.ombre.url || '').trim() && !config.ombre.readEnabled) {
+    console.warn(
+      '[xinchao] OMBRE_MCP_URL 已配置，但 OMBRE_READ_ENABLED=false —— '
+      + '网页端会显示"未接入 OB"，即使 OB 已正确部署也一样。'
+      + '要在网页端看记忆星图/接入 OB，请把 OMBRE_READ_ENABLED 设为 true 后重启容器。'
+    );
+  }
+
   const externalMemoryEnabled = Boolean(
     config.ombre.readEnabled
     || config.ombre.writeEnabled
