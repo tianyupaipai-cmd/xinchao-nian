@@ -1,5 +1,6 @@
 import { SYSTEM_VERSION } from './version.js';
 import { PENDING_KINDS } from './pending-queue.js';
+import { PERSONALITY_DIMENSIONS } from './personality-store.js';
 
 const SUPPORTED_PROTOCOLS = new Set(['2025-03-26', '2025-06-18']);
 const INTERACTION_TYPES = new Set([
@@ -240,6 +241,39 @@ export const XINCHAO_TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: 'xinchao_personality_reflect',
+    title: '完成月度性格内核自评',
+    description: [
+      '由 AI 自己完成一次月度 14 维性格内核评估，并写入部署侧私有 personality.json。人类不参与打分。',
+      '必须一次提交完整 14 维，每维包含 0–100 分和简短理由；同一月份重复调用只返回原结果，不覆盖历史。',
+      '这不是根据 12 维驱力自动反推性格：评分应来自 AI 对本月自身经历的审慎回顾。私人理由默认不会进入 Dashboard 快照。',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        month: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$', description: '评估月份，格式 YYYY-MM。' },
+        dimensions: {
+          type: 'array',
+          minItems: 14,
+          maxItems: 14,
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', enum: PERSONALITY_DIMENSIONS.map((item) => item.key) },
+              score: { type: 'number', minimum: 0, maximum: 100 },
+              reason: { type: 'string', minLength: 1, maxLength: 1200 },
+            },
+            required: ['key', 'score', 'reason'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['month', 'dimensions'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
     name: 'xinchao_cabin_inbox',
     title: '读取已解锁的小屋来信',
     description: '读取用户在小屋里明确开锁、允许 AI 查看的人类来信。上锁的信不会返回正文，也不能绕过锁读取。',
@@ -466,6 +500,13 @@ function pendingConsumedArgs(args = {}) {
   return { ids };
 }
 
+function personalityReflectArgs(args = {}) {
+  return {
+    month: String(args.month ?? '').trim(),
+    dimensions: Array.isArray(args.dimensions) ? args.dimensions : [],
+  };
+}
+
 async function callTool(name, args, handlers) {
   const fallbackSessionId = handlers.defaultSessionId ?? '';
   if (name === 'xinchao_context') {
@@ -501,6 +542,16 @@ async function callTool(name, args, handlers) {
   if (name === 'xinchao_pending_consumed') {
     const result = await handlers.pendingConsumed(pendingConsumedArgs(args));
     return toolText(`已回执说出口：${result.consumed.length} 条`, result);
+  }
+  if (name === 'xinchao_personality_reflect') {
+    if (!handlers.personalityReflect) throw new Error('性格内核私有存储未接入');
+    const result = await handlers.personalityReflect(personalityReflectArgs(args));
+    return toolText(
+      result.duplicate
+        ? `${result.month} 的性格内核已经评估过，本次未覆盖。`
+        : `${result.month} 的 14 维性格内核自评已写入私有状态。`,
+      { month: result.month, duplicate: result.duplicate },
+    );
   }
   if (name === 'xinchao_cabin_inbox') {
     const notes = await handlers.cabinInbox();
@@ -569,6 +620,7 @@ export async function handleMcpMessage(payload, handlers) {
           '一次实际互动后可调用 xinchao_event 更新窗口短状态；event_id 必须唯一，重试时复用。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
           '独处时想留到下次窗口的事用 xinchao_pending_create；真正说出后用 xinchao_pending_consumed 回执。留下/ 放下只能由用户在 Dashboard 决定。',
+          '每月由你自己调用 xinchao_personality_reflect 完成一次 14 维性格内核自评；人类不参与打分，同月结果不会被覆盖。',
           '用户开锁后可用 xinchao_cabin_inbox 读取小屋来信；上锁的正文不会返回。你想给用户留话时可用 xinchao_cabin_note。',
           '只有结果明确的真实互动才填写 interaction_type；不要提交聊天正文或欲望数值。',
         ].join(''),

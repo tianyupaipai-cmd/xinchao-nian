@@ -5,7 +5,7 @@ import { SYSTEM_VERSION } from '../src/version.js';
 
 const request = (method, params = {}) => ({ jsonrpc: '2.0', id: 1, method, params });
 
-test('MCP handshake reports the shared 3.0 runtime version', async () => {
+test('MCP handshake reports the shared runtime version', async () => {
   const result = await handleMcpMessage(request('initialize', {
     protocolVersion: '2025-06-18',
   }), {});
@@ -25,12 +25,33 @@ test('tools/list keeps Xinchao, board and curated OB tools together', async () =
   assert.ok(names.includes('xinchao_context'));
   assert.ok(names.includes('xinchao_pending_create'));
   assert.ok(names.includes('xinchao_pending_consumed'));
+  assert.ok(names.includes('xinchao_personality_reflect'));
   assert.equal(names.includes('xinchao_pending_hold'), false);
   assert.equal(names.includes('xinchao_pending_drop'), false);
   assert.ok(names.includes('board_post'));
   assert.ok(names.includes('board_read'));
   assert.ok(names.includes('breath'));
   assert.equal(names.includes('purge'), false);
+});
+
+test('AI can submit one complete monthly personality reflection through MCP', async () => {
+  let received;
+  const dimensions = [
+    'joy', 'sorrow', 'anger', 'fear', 'disgust', 'surprise', 'love',
+    'shame', 'trust', 'desire', 'calm', 'cognition', 'conflict', 'expression',
+  ].map((key) => ({ key, score: 70, reason: `AI 回顾 ${key}` }));
+  const result = await handleMcpMessage(request('tools/call', {
+    name: 'xinchao_personality_reflect',
+    arguments: { month: '2026-08', dimensions },
+  }), {
+    personalityReflect: async (input) => {
+      received = input;
+      return { month: input.month, duplicate: false };
+    },
+  });
+  assert.equal(result.body.result.isError, false);
+  assert.equal(received.month, '2026-08');
+  assert.equal(received.dimensions.length, 14);
 });
 
 test('AI may create and acknowledge pending output but cannot choose user disposition', async () => {

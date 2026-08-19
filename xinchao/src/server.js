@@ -1223,6 +1223,7 @@ const server = createServer(async (request, response) => {
         handoffNote: async (note) => saveHandoffNote(note, 'mcp'),
         pendingCreate: async (input) => createPendingOutput(input, 'mcp'),
         pendingConsumed: async ({ ids }) => consumePendingOutputs(ids, 'mcp'),
+        personalityReflect: async (input) => personality.recordAiAssessment(input),
         cabinInbox: async () => cabin.unlockedUserNotes(),
         cabinNote: async (note) => cabin.addNote({ ...note, from: 'ai', locked: false }),
         // 公共留言板：只有配了令牌才把 board_post / board_read 工具暴露出来 / 接受调用。
