@@ -1,6 +1,10 @@
 export const SATURATE_CEIL  = 0.80;
 export const SATURATE_FLOOR = 0.65;
 
+// 每维可选的 satietyHours 是 3.1 预留的调参口。现在 12 维都缺省回落到
+// SATIETY_HOURS（2h）；以后只调某一维时，不需要再改状态结构或结算流程。
+// growPerHour=0 的维度自然 no-op，不做特判。
+
 // 每个驱力的「静息天花板」：没有事件、共振或回流时，时间地板把它托到这个高度就停。
 // 关系类（想她/惦记/馋）自然浮得高——她不在时想念本就该涨；杂类（好奇/无聊/责任）低。
 // 被事件/回流顶到天花板之上后，会慢慢松弛回各自的 ceil，而不是所有维度一起爬到 0.80。
@@ -13,6 +17,7 @@ export const DIMENSIONS = Object.freeze({
     satisfyMul: 0.30,
     nightMul: 0.4,
     dawnFreeze: true,
+    // satietyHours: 2,
   },
   monitor: {
     label: '惦记她、想知道她在做什么',

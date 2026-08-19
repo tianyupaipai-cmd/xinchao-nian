@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseMemoryMapText, parseMemoryPreviewText } from '../src/ombre-client.js';
+import { materialWithRefs, parseMemoryMapText, parseMemoryPreviewText, parseSurfacedBucketIds } from '../src/ombre-client.js';
+
+test('breath metadata exposes source bucket ids without guessing from body text', () => {
+  const text = `
+[bucket_id:74a5375d099c] [domain:恋爱,记忆]\n正文里偶然有 deadbeef1234 不应该被当成桶。
+---
+[语义关联] [bucket_id:16ef1d2b1fd9] [domain:内心]\n另一条。
+---
+[bucket_id:74a5375d099c]\n重复表头不重复计数。`;
+  assert.deepEqual(parseSurfacedBucketIds(text), ['74a5375d099c', '16ef1d2b1fd9']);
+  assert.deepEqual(materialWithRefs(text).bucketIds, ['74a5375d099c', '16ef1d2b1fd9']);
+  assert.deepEqual(materialWithRefs(text).domains, ['恋爱', '记忆', '内心']);
+});
 
 test('pulse text becomes a metadata-only memory map', () => {
   const result = parseMemoryMapText(`

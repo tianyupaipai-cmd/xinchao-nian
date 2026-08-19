@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimensions.js';
 import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought } from './thought-pool.js';
+import { tickPending } from './pending-queue.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 // 驱力被顶到自己的静息天花板之上后，每小时松弛回来的比例（越大回落越快）。
@@ -14,6 +15,15 @@ const iso = (value) => new Date(value).toISOString();
 const SESSION_TONES = new Set(['neutral', 'calm', 'warm', 'guarded', 'conflicted', 'focused', 'playful', 'tired']);
 const SESSION_FIELDS = ['warmth', 'tension', 'attention', 'confidence'];
 const MAX_RECENT_CONVERSATION_EVENTS = 256;
+const DEFAULT_SATISFACTION_PLATEAU_HOURS = 2;
+
+// 只用现有 12 维的小型耦合表。它改的是“接下来自然长多快”，
+// 不是每次 tick 直接往数值上叠加，因此不会因结算频率变高而自激。
+const DRIVE_GROWTH_COUPLINGS = Object.freeze({
+  possess: [{ source: 'anger', slope: -0.65 }],
+  crave: [{ source: 'grieve', slope: 0.50 }],
+  monitor: [{ source: 'grieve', slope: 0.45 }],
+});
 
 export const INTERACTION_TYPES = Object.freeze([
   'companionship',
@@ -49,10 +59,14 @@ function ensureStateShape(state) {
     : [];
   state.interactionUsage ??= {};
   state.handoffNotes = Array.isArray(state.handoffNotes) ? state.handoffNotes : [];
+  state.pending = Array.isArray(state.pending) ? state.pending : [];
+  state.satisfactionPlateaus = state.satisfactionPlateaus && typeof state.satisfactionPlateaus === 'object'
+    ? state.satisfactionPlateaus
+    : {};
   state.arrivalHistogram = Array.isArray(state.arrivalHistogram) && state.arrivalHistogram.length === 24
     ? state.arrivalHistogram.map((n) => Number(n) || 0)
     : Array.from({ length: 24 }, () => 0);
-  state.schemaVersion = Math.max(7, Number(state.schemaVersion) || 0);
+  state.schemaVersion = Math.max(8, Number(state.schemaVersion) || 0);
   return state;
 }
 
@@ -198,7 +212,7 @@ function applySessionOverlay(state, event, now) {
 export function newState(now = new Date()) {
   const at = iso(now);
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 0,
     consciousness: 'awake',
     lastConversationAt: at,
@@ -221,6 +235,8 @@ export function newState(now = new Date()) {
     nextDaytimeEmergenceAt: null,
     daytimeEmergenceUsage: {},
     pendingAwareness: null,
+    pending: [],
+    satisfactionPlateaus: {},
     sessionOverlays: {},
     contextDeliveries: {},
     recentConversationEvents: [],
@@ -324,6 +340,16 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
   const isNight   = hour >= 22 || hour < 6;
 
   const fatigueMultiplier = 1 - clamp(Number(state.fatigue ?? 0), 0, 0.3);
+  const couplingEnabled = options.couplingEnabled !== false;
+  const couplingSnapshot = Object.fromEntries(DRIVE_KEYS.map((key) => [key, Number(state.drives[key] ?? 0)]));
+
+  for (const [key, plateau] of Object.entries(state.satisfactionPlateaus)) {
+    const until = Date.parse(plateau?.until ?? '');
+    if (!DRIVE_KEYS.includes(key) || !Number.isFinite(until) || until <= nowMs) {
+      delete state.satisfactionPlateaus[key];
+      changed = true;
+    }
+  }
 
   for (const key of DRIVE_KEYS) {
     const dim = DIMENSIONS[key];
@@ -337,7 +363,9 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
 
     // 时间地板 = 每个驱力向自己的静息天花板生长；被事件/共振/回流顶到之上就慢慢松弛回来。
     // 不再让十二维一起爬到同一个 0.80——那样 topDrives 没了区分度，驱力偏置召回也失了信号。
-    const ceil = Number.isFinite(dim.ceil) ? dim.ceil : SATURATE_CEIL;
+    const baseCeil = Number.isFinite(dim.ceil) ? dim.ceil : SATURATE_CEIL;
+    const bias = clamp(Number(options.driveBias?.[key] ?? 1), 0.9, 1.1);
+    const ceil = clamp(baseCeil * bias);
     let next;
     if (current > ceil) {
       const decay = (current - ceil) * CEIL_RELAX_PER_HOUR * elapsedHours;
@@ -346,6 +374,14 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
       let rate = dim.growPerHour;
       if (isNight && dim.nightMul !== undefined) rate *= dim.nightMul;
       rate *= fatigueMultiplier;
+      if (couplingEnabled) {
+        for (const coupling of DRIVE_GROWTH_COUPLINGS[key] ?? []) {
+          const sourceValue = clamp(Number(couplingSnapshot[coupling.source] ?? 0));
+          rate *= Math.max(0, 1 + coupling.slope * sourceValue);
+        }
+      }
+      const plateauUntil = Date.parse(state.satisfactionPlateaus[key]?.until ?? '');
+      if (Number.isFinite(plateauUntil) && plateauUntil > nowMs) rate = 0;
       next = Math.min(clamp(current + rate * elapsedHours), ceil);
     }
 
@@ -363,6 +399,10 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
       if (state.drives[key] !== before) changed = true;
     }
   }
+
+  // pending_from_me 也是心潮时间结算的一部分：送达未回执要重试，
+  // consumed 宽限期和普通 72h 过期由同一颗心跳清理。held 始终不因时间丢失。
+  if (tickPending(state, now)) changed = true;
 
   // Fatigue: slowly recovers during sleep, slowly builds during prolonged high-drive wakefulness
   if (state.consciousness === 'sleeping') {
@@ -454,6 +494,18 @@ export function applyConversationEvent(input, event = {}, now = new Date(), opti
     if (!DRIVE_KEYS.includes(key)) continue;
     const dim = DIMENSIONS[key];
     state.drives[key] = Number(clamp(Number(state.drives[key]) * (dim.satisfyMul ?? 0.40)).toFixed(4));
+    const plateauHours = clamp(
+      Number(dim.satietyHours ?? options.satisfactionPlateauHours ?? DEFAULT_SATISFACTION_PLATEAU_HOURS),
+      0,
+      24,
+    );
+    if (plateauHours > 0) {
+      state.satisfactionPlateaus[key] = {
+        startedAt: iso(now),
+        until: iso(new Date(now.getTime() + plateauHours * 3_600_000)),
+        reason: 'satisfied',
+      };
+    }
 
     // Cross-inhibition: satisfying key X reduces drives that list X in inhibitedBy
     for (const otherKey of DRIVE_KEYS) {
@@ -513,6 +565,7 @@ export function settleAndApplyConversationEvent(input, event = {}, now = new Dat
       recordArrival: options.recordArrival === true,
       timeZone: options.settle?.timeZone ?? options.timeZone,
       arrivalGapMinutes: options.arrivalGapMinutes,
+      satisfactionPlateauHours: options.settle?.satisfactionPlateauHours,
     },
   );
   return {
@@ -587,13 +640,13 @@ export function applyDriveFeedback(input, feedback = {}, now = new Date()) {
 // ── Output reflux ─────────────────────────────────────────────────
 // 他自己产出的一次自主表达（自主念头 / 白天浮现），回过头改变自己的状态。
 // 不直接改驱力，而是在思维池里留痕，让收敛交给既有的张力系统（见 reinforceThought）。
-export function applyOutputReflux(input, driveKey, text = '', now = new Date(), amount = 0.30) {
+export function applyOutputReflux(input, driveKey, text = '', now = new Date(), amount = 0.30, metadata = {}) {
   const state = ensureStateShape(structuredClone(input));
   if (!DRIVE_KEYS.includes(driveKey)) {
     return { state, applied: false, reasonCode: 'unknown_drive', key: driveKey || null };
   }
   state.thoughtPool ??= newThoughtPool();
-  const result = reinforceThought(state.thoughtPool, driveKey, text, amount);
+  const result = reinforceThought(state.thoughtPool, driveKey, text, amount, metadata);
   state.revision += 1;
   return {
     state,
@@ -843,5 +896,3 @@ export function dreamAllowed(state, now, minIntervalHours, maxPerDay) {
   if (!latest) return true;
   return now.getTime() - Date.parse(latest.createdAt) >= minIntervalHours * 3_600_000;
 }
-
-

@@ -7,8 +7,12 @@
  *   只有窗口明确回执才 consumed —— 否则还没说出口的话会被静悄悄删掉，
  *   那正是这套系统要防的事。
  *
- * 状态流转：pending → delivered → consumed
- *                  ↘ （超期未回执）↗ 退回 pending 重试
+ * 两条正交轴：
+ *   status（AI 推进）：pending → delivered → consumed
+ *                           ↘ （超期未回执）↗ 退回 pending 重试
+ *   disposition（只有用户能决定）：null | held | dropped
+ *
+ * 说没说出口和值不值得留是两件事，不能压成一条状态机。
  */
 
 export const PENDING_KINDS = Object.freeze([
@@ -24,6 +28,8 @@ export const MAX_PENDING = 12;          // 队列上限，防止永久霸占窗�
 export const DELIVER_PER_CONTEXT = 3;   // 一次最多带几条进窗口
 const EXPIRE_HOURS = 72;                // 超过就不必再说了
 const REDELIVER_AFTER_MIN = 30;         // delivered 但没回执，多久退回重试
+export const CONSUMED_GRACE_HOURS = 24; // 说完后留给用户 hold/drop 的时间
+const TERMINAL_AUDIT_HOURS = 24;         // 终态在 state 里短留，便于 UI 确认结果
 
 const ms = (h) => h * 3600 * 1000;
 
@@ -32,7 +38,24 @@ export function newPendingQueue() {
 }
 
 function normalize(list) {
-  return Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') : [];
+  if (!Array.isArray(list)) return [];
+  const items = list.filter((x) => x && typeof x === 'object');
+  for (const item of items) {
+    item.disposition = item.disposition === 'held' || item.disposition === 'dropped'
+      ? item.disposition
+      : null;
+    item.dispositionAt ??= null;
+    item.holdSync = item.holdSync && typeof item.holdSync === 'object'
+      ? item.holdSync
+      : null;
+    if (item.holdSync) {
+      item.holdSync.landedBucketId ??= item.ombreBucketId ?? null;
+      item.holdSync.linkedSourceBucketIds = Array.isArray(item.holdSync.linkedSourceBucketIds)
+        ? [...new Set(item.holdSync.linkedSourceBucketIds.map(String).filter(Boolean))]
+        : [];
+    }
+  }
+  return items;
 }
 
 /** 内容去重键：同一个驱力下意思相同的东西不重复攒 */
@@ -59,13 +82,17 @@ export function addPending(state, input, now = new Date()) {
     createdAt: now.toISOString(),
     deliveredAt: null,
     consumedAt: null,
+    disposition: null,
+    dispositionAt: null,
+    holdSync: null,
     ombreBucketId: input.ombreBucketId ?? null,
+    sourceOmbreBucketIds: Array.isArray(input.sourceOmbreBucketIds)
+      ? [...new Set(input.sourceOmbreBucketIds.map(String).map((id) => id.trim()).filter(Boolean))].slice(0, 8)
+      : [],
   };
 
   const key = dedupeKey(candidate);
-  const existing = state.pending.find(
-    (p) => p.status !== 'consumed' && dedupeKey(p) === key,
-  );
+  const existing = state.pending.find((p) => p.disposition !== 'dropped' && dedupeKey(p) === key);
   if (existing) {
     // 又想起一次 = 更挂念，但封顶，不让它无限压过别的
     existing.weight = Math.min(1, Number(existing.weight ?? 0.5) + 0.1);
@@ -73,11 +100,15 @@ export function addPending(state, input, now = new Date()) {
   }
 
   state.pending.push(candidate);
-  // 超出上限时丢掉最轻最旧的，而不是最新的
-  if (state.pending.length > MAX_PENDING) {
-    state.pending.sort((a, b) =>
-      (b.weight - a.weight) || (Date.parse(b.createdAt) - Date.parse(a.createdAt)));
-    state.pending = state.pending.slice(0, MAX_PENDING);
+  // 只限制仍可交付的活动条目。held 和宽限期终态不能因排队被静默删除。
+  const active = state.pending
+    .filter((p) => p.disposition !== 'dropped' && p.status !== 'consumed')
+    .sort((a, b) => (b.weight - a.weight) || (Date.parse(b.createdAt) - Date.parse(a.createdAt)));
+  if (active.length > MAX_PENDING) {
+    const keep = new Set(active.slice(0, MAX_PENDING).map((p) => p.id));
+    state.pending = state.pending.filter(
+      (p) => p.disposition === 'held' || p.status === 'consumed' || keep.has(p.id),
+    );
   }
   return candidate;
 }
@@ -89,8 +120,32 @@ export function tickPending(state, now = new Date()) {
   let changed = false;
 
   state.pending = state.pending.filter((p) => {
-    if (p.status === 'consumed') return false;                 // 说过了就出队
-    if (t - Date.parse(p.createdAt) > ms(EXPIRE_HOURS)) {      // 太久了，不必再说
+    const dispositionAt = Date.parse(p.dispositionAt ?? '');
+    if (p.disposition === 'dropped') {
+      // dropped 立即退出交付；短留一天仅为让 UI 能显示“已放下”。
+      if (Number.isFinite(dispositionAt) && t - dispositionAt > ms(TERMINAL_AUDIT_HOURS)) {
+        changed = true;
+        return false;
+      }
+      return true;
+    }
+    if (p.status === 'consumed' && p.disposition == null) {
+      const consumedAt = Date.parse(p.consumedAt ?? '');
+      if (Number.isFinite(consumedAt) && t - consumedAt > ms(CONSUMED_GRACE_HOURS)) {
+        changed = true;
+        return false;
+      }
+      return true;
+    }
+    if (p.status === 'consumed' && p.disposition === 'held' && p.holdSync?.status === 'synced') {
+      const syncedAt = Date.parse(p.holdSync.syncedAt ?? p.dispositionAt ?? '');
+      if (Number.isFinite(syncedAt) && t - syncedAt > ms(TERMINAL_AUDIT_HOURS)) {
+        changed = true;
+        return false;
+      }
+      return true;
+    }
+    if (p.disposition !== 'held' && t - Date.parse(p.createdAt) > ms(EXPIRE_HOURS)) {
       changed = true;
       return false;
     }
@@ -112,7 +167,7 @@ export function tickPending(state, now = new Date()) {
 /** 挑几条带进 Context：挂念重的优先，同重量老的优先。 */
 export function selectForDelivery(state, limit = DELIVER_PER_CONTEXT) {
   return normalize(state.pending)
-    .filter((p) => p.status === 'pending')
+    .filter((p) => p.status === 'pending' && p.disposition !== 'dropped')
     .sort((a, b) =>
       (Number(b.weight ?? 0) - Number(a.weight ?? 0))
       || (Date.parse(a.createdAt) - Date.parse(b.createdAt)))
@@ -145,6 +200,86 @@ export function markConsumed(state, ids, now = new Date()) {
     }
   }
   return consumed;
+}
+
+/** 用户决定留下：不改 status，只开启 OB 持久化任务。 */
+export function holdPending(state, ids, now = new Date()) {
+  const set = new Set(ids);
+  const held = [];
+  for (const p of normalize(state.pending)) {
+    if (!set.has(p.id) || p.disposition === 'dropped') continue;
+    p.disposition = 'held';
+    p.dispositionAt = now.toISOString();
+    if (p.holdSync?.status !== 'synced') {
+      p.holdSync = {
+        status: 'pending',
+        attempts: Number(p.holdSync?.attempts ?? 0),
+        lastAttemptAt: p.holdSync?.lastAttemptAt ?? null,
+        lastError: p.holdSync?.lastError ?? null,
+        syncedAt: null,
+        landedBucketId: p.ombreBucketId ?? p.holdSync?.landedBucketId ?? null,
+        linkedSourceBucketIds: p.holdSync?.linkedSourceBucketIds ?? [],
+      };
+    }
+    held.push(p.id);
+  }
+  return held;
+}
+
+/** 用户决定放下：不改 status，但立即不再交付、不再写 OB。 */
+export function dropPending(state, ids, now = new Date()) {
+  const set = new Set(ids);
+  const dropped = [];
+  for (const p of normalize(state.pending)) {
+    if (!set.has(p.id)) continue;
+    p.disposition = 'dropped';
+    p.dispositionAt = now.toISOString();
+    p.holdSync = null;
+    dropped.push(p.id);
+  }
+  return dropped;
+}
+
+/** 待写 OB 的 held 条目；写失败不会改去留决定，下次继续重试。 */
+export function selectForHoldSync(state, limit = 3) {
+  return normalize(state.pending)
+    .filter((p) => p.disposition === 'held' && p.holdSync?.status !== 'synced')
+    .sort((a, b) => Date.parse(a.dispositionAt ?? a.createdAt) - Date.parse(b.dispositionAt ?? b.createdAt))
+    .slice(0, Math.max(1, Number(limit) || 1));
+}
+
+export function markHoldSyncResult(state, id, result = {}, now = new Date()) {
+  const item = normalize(state.pending).find((p) => p.id === id && p.disposition === 'held');
+  if (!item) return null;
+  const attempts = Number(item.holdSync?.attempts ?? 0) + 1;
+  const bucketId = String(result.ombreBucketId ?? item.holdSync?.landedBucketId ?? item.ombreBucketId ?? '').trim();
+  const linkedSourceBucketIds = [...new Set([
+    ...(item.holdSync?.linkedSourceBucketIds ?? []),
+    ...(Array.isArray(result.linkedSourceBucketIds) ? result.linkedSourceBucketIds : []),
+  ].map(String).filter(Boolean))];
+  if (bucketId) item.ombreBucketId = bucketId;
+  if (result.ok && bucketId) {
+    item.holdSync = {
+      status: 'synced',
+      attempts,
+      lastAttemptAt: now.toISOString(),
+      lastError: null,
+      syncedAt: now.toISOString(),
+      landedBucketId: bucketId,
+      linkedSourceBucketIds,
+    };
+  } else {
+    item.holdSync = {
+      status: 'retry',
+      attempts,
+      lastAttemptAt: now.toISOString(),
+      lastError: String(result.error ?? 'ombre_write_failed').slice(0, 240),
+      syncedAt: null,
+      landedBucketId: bucketId || null,
+      linkedSourceBucketIds,
+    };
+  }
+  return item;
 }
 
 /** 给 Context 用的渲染文本。第一人称，不带内部字段。 */

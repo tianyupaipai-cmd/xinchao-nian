@@ -20,7 +20,14 @@ export function tickThoughtPool(pool) {
   const promoted = [];
   pool.flash = pool.flash.filter((t) => {
     if (t.intensity >= PROMOTE_THRESHOLD && t.age >= PROMOTE_MIN_AGE && pool.obsessions.length + promoted.length < MAX_OBSESSIONS) {
-      promoted.push({ key: t.key, text: t.text, intensity: t.intensity, feedbacks: 0 });
+      promoted.push({
+        key: t.key,
+        text: t.text,
+        intensity: t.intensity,
+        feedbacks: 0,
+        ombreBucketId: t.ombreBucketId ?? null,
+        sourceOmbreBucketIds: Array.isArray(t.sourceOmbreBucketIds) ? [...t.sourceOmbreBucketIds] : [],
+      });
       return false;
     }
     return true;
@@ -42,12 +49,29 @@ export function tickThoughtPool(pool) {
   return feedbacks;
 }
 
-export function addFlashThought(pool, key, text, intensity = 0.70) {
+function normalizeMemoryRefs(metadata = {}) {
+  const ids = Array.isArray(metadata.sourceOmbreBucketIds)
+    ? metadata.sourceOmbreBucketIds.map(String).map((id) => id.trim()).filter(Boolean)
+    : [];
+  const primary = String(metadata.ombreBucketId ?? ids[0] ?? '').trim() || null;
+  return {
+    ombreBucketId: primary,
+    sourceOmbreBucketIds: [...new Set(primary ? [primary, ...ids] : ids)].slice(0, 8),
+  };
+}
+
+export function addFlashThought(pool, key, text, intensity = 0.70, metadata = {}) {
   if (pool.flash.length >= MAX_FLASH) {
     pool.flash.sort((a, b) => a.intensity - b.intensity);
     pool.flash.shift();
   }
-  pool.flash.push({ key, text, intensity: Math.min(1, intensity), age: 0 });
+  pool.flash.push({
+    key,
+    text,
+    intensity: Math.min(1, intensity),
+    age: 0,
+    ...normalizeMemoryRefs(metadata),
+  });
 }
 
 export function obsessionBonus(pool, key) {
@@ -62,16 +86,22 @@ export function obsessionBonus(pool, key) {
 // PROMOTE_MIN_AGE，升成 obsession —— 那时才会有界地把驱力顶上去几次然后退休。
 // 执念本来就是这么形成的，所以不完全阻尼；上限由既有池机制（MAX_FEEDBACKS）
 // 和输出本身的发送频率闸门共同兜底。
-export function reinforceThought(pool, key, text, amount = 0.30) {
+export function reinforceThought(pool, key, text, amount = 0.30, metadata = {}) {
   pool.flash ??= [];
   const step = Math.min(1, Math.max(0, Number(amount) || 0));
   const existing = pool.flash.find((t) => t.key === key);
   if (existing) {
     existing.intensity = Math.min(1, existing.intensity + step);
     if (text) existing.text = text;
+    const refs = normalizeMemoryRefs(metadata);
+    if (refs.ombreBucketId) existing.ombreBucketId = refs.ombreBucketId;
+    existing.sourceOmbreBucketIds = [...new Set([
+      ...(existing.sourceOmbreBucketIds ?? []),
+      ...refs.sourceOmbreBucketIds,
+    ])].slice(0, 8);
     return { key, intensity: Number(existing.intensity.toFixed(4)), seeded: false };
   }
-  addFlashThought(pool, key, text, step);
+  addFlashThought(pool, key, text, step, metadata);
   const created = pool.flash.find((t) => t.key === key);
   return { key, intensity: Number((created?.intensity ?? step).toFixed(4)), seeded: true };
 }

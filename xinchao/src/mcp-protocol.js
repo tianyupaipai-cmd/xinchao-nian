@@ -1,4 +1,5 @@
 import { SYSTEM_VERSION } from './version.js';
+import { PENDING_KINDS } from './pending-queue.js';
 
 const SUPPORTED_PROTOCOLS = new Set(['2025-03-26', '2025-06-18']);
 const INTERACTION_TYPES = new Set([
@@ -197,6 +198,46 @@ export const XINCHAO_TOOLS = [
       idempotentHint: true,
       openWorldHint: false,
     },
+  },
+  {
+    name: 'xinchao_pending_create',
+    title: '攒一件等你回来说的事',
+    description: [
+      '保存一条你独处时产生的第一人称念头，等用户回来时送达给窗口。',
+      '这只是创建待交付条目；你不能替用户决定留下或放下。',
+      '不要放聊天原文、密钥、隐私或技术日志。',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: [...PENDING_KINDS] },
+        content: { type: 'string', minLength: 1, maxLength: 600 },
+        weight: { type: 'number', minimum: 0, maximum: 1, default: 0.5 },
+        source_ombre_bucket_ids: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, maxLength: 160 },
+          maxItems: 8,
+          description: '这条念头围绕的 OB 来源桶 id；只做引用与追溯。',
+        },
+      },
+      required: ['kind', 'content'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'xinchao_pending_consumed',
+    title: '回执已经说出口',
+    description: '当你确实在窗口里把 pending_from_me 的内容告诉用户后，用原 id 回执。回执不等于替用户决定留下或放下。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 160 }, minItems: 1, maxItems: 12 },
+      },
+      required: ['ids'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'xinchao_cabin_inbox',
@@ -402,6 +443,29 @@ function cabinNoteArgs(args = {}) {
   return { eventId, content, timestamp: args.timestamp ?? null };
 }
 
+function pendingCreateArgs(args = {}) {
+  const kind = String(args.kind ?? '').trim();
+  if (!PENDING_KINDS.includes(kind)) throw new Error('kind 不在允许范围内');
+  const content = String(args.content ?? '').trim().slice(0, 600);
+  if (!content) throw new Error('content 是必填项');
+  return {
+    kind,
+    content,
+    weight: Math.max(0, Math.min(1, numberOr(args.weight, 0.5))),
+    sourceOmbreBucketIds: Array.isArray(args.source_ombre_bucket_ids)
+      ? args.source_ombre_bucket_ids.map(String).map((id) => id.trim()).filter(Boolean).slice(0, 8)
+      : [],
+  };
+}
+
+function pendingConsumedArgs(args = {}) {
+  const ids = Array.isArray(args.ids)
+    ? [...new Set(args.ids.map(String).map((id) => id.trim()).filter(Boolean))].slice(0, 12)
+    : [];
+  if (!ids.length) throw new Error('ids 是必填项');
+  return { ids };
+}
+
 async function callTool(name, args, handlers) {
   const fallbackSessionId = handlers.defaultSessionId ?? '';
   if (name === 'xinchao_context') {
@@ -429,6 +493,14 @@ async function callTool(name, args, handlers) {
       `近期交接便签已接收：revision=${result.revision}${duplicate}`,
       result,
     );
+  }
+  if (name === 'xinchao_pending_create') {
+    const result = await handlers.pendingCreate(pendingCreateArgs(args));
+    return toolText(`已攒下：id=${result.item.id}${result.duplicate ? ' duplicate=true' : ''}`, result);
+  }
+  if (name === 'xinchao_pending_consumed') {
+    const result = await handlers.pendingConsumed(pendingConsumedArgs(args));
+    return toolText(`已回执说出口：${result.consumed.length} 条`, result);
   }
   if (name === 'xinchao_cabin_inbox') {
     const notes = await handlers.cabinInbox();
@@ -496,6 +568,7 @@ export async function handleMcpMessage(payload, handlers) {
           '新窗口开始时调用 xinchao_context；服务端会绑定当前 MCP 连接，无需自行编写 session_id。',
           '一次实际互动后可调用 xinchao_event 更新窗口短状态；event_id 必须唯一，重试时复用。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
+          '独处时想留到下次窗口的事用 xinchao_pending_create；真正说出后用 xinchao_pending_consumed 回执。留下/ 放下只能由用户在 Dashboard 决定。',
           '用户开锁后可用 xinchao_cabin_inbox 读取小屋来信；上锁的正文不会返回。你想给用户留话时可用 xinchao_cabin_note。',
           '只有结果明确的真实互动才填写 interaction_type；不要提交聊天正文或欲望数值。',
         ].join(''),
