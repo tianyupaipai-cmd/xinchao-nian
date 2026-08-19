@@ -1,4 +1,5 @@
 import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
+import { buildConnectionDiagnostics } from './connection-diagnostics.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, Number(value) || 0));
 
@@ -153,39 +154,44 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
       wakeBridgeProtocol: Boolean(config.bridge?.enabled),
       privateDreamText: Boolean(config.dashboard?.includePrivateText),
     },
+    connections: buildConnectionDiagnostics(config),
   };
 }
 
 export function buildConnectionManifest(config = {}) {
-  const dashboardBaseUrl = String(config.dashboard?.publicBaseUrl || config.oauth?.publicBaseUrl || '').replace(/\/$/, '');
-  const mcpBaseUrl = String(config.oauth?.publicBaseUrl || config.dashboard?.publicBaseUrl || '').replace(/\/$/, '');
+  // Dashboard and MCP may share a host, but their settings and credentials are
+  // independent. Never fall back from one base URL to the other: that hides
+  // incomplete configuration and encourages users to paste the wrong address.
+  const dashboardBaseUrl = String(config.dashboard?.publicBaseUrl || '').replace(/\/$/, '');
+  const mcpBaseUrl = String(config.oauth?.publicBaseUrl || '').replace(/\/$/, '');
   return {
     schemaVersion: 1,
     system: 'xinchao-dynamic-mind',
     publicBaseUrl: dashboardBaseUrl || mcpBaseUrl || null,
+    connections: buildConnectionDiagnostics(config),
     profiles: [
       {
         id: 'web-dashboard',
         audience: ['desktop-browser', 'mobile-browser', 'self-hosted-frontend'],
-        enabled: Boolean(config.dashboard?.enabled),
+        enabled: Boolean(config.dashboard?.enabled && dashboardBaseUrl),
         auth: 'http-only-session-cookie',
-        endpoint: dashboardBaseUrl ? `${dashboardBaseUrl}/dashboard/session` : '/dashboard/session',
+        endpoint: dashboardBaseUrl ? `${dashboardBaseUrl}/dashboard/session` : null,
         note: '网页只提交一次 Dashboard 访问口令；服务密钥不会进入浏览器。',
       },
       {
         id: 'remote-mcp-oauth',
         audience: ['claude', 'chatgpt', 'gemini', 'oauth-capable-ai'],
-        enabled: Boolean(config.mcp?.enabled && config.oauth?.enabled),
+        enabled: Boolean(config.mcp?.enabled && config.oauth?.enabled && mcpBaseUrl),
         auth: 'oauth-2.1-pkce',
-        endpoint: mcpBaseUrl ? `${mcpBaseUrl}/mcp` : '/mcp',
+        endpoint: mcpBaseUrl ? `${mcpBaseUrl}/mcp` : null,
         note: '优先用于支持远程 MCP 与 OAuth 的网页 AI。',
       },
       {
         id: 'remote-mcp-bearer',
         audience: ['claude-code', 'codex', 'ide', 'agent-runtime'],
-        enabled: Boolean(config.mcp?.enabled),
+        enabled: Boolean(config.mcp?.enabled && mcpBaseUrl),
         auth: 'bearer-token',
-        endpoint: mcpBaseUrl ? `${mcpBaseUrl}/mcp` : '/mcp',
+        endpoint: mcpBaseUrl ? `${mcpBaseUrl}/mcp` : null,
         note: 'Bearer 仅放在本地配置或服务器环境变量中。',
       },
       {

@@ -1,6 +1,6 @@
 {
   "name": "xinchao-dynamic-mind",
-  "version": "2.5.1",
+  "version": "3.0.1",
   "description": "Independent dynamic state engine with remote MCP, OAuth, short-term continuity and optional memory adapters.",
   "type": "module",
   "license": "MIT",

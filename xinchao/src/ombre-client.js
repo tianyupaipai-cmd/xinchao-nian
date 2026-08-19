@@ -1,3 +1,5 @@
+import { SYSTEM_VERSION } from './version.js';
+
 export class OmbreClient {
   constructor(config) {
     this.config = config;
@@ -36,7 +38,7 @@ export class OmbreClient {
           params: {
             protocolVersion: '2025-06-18',
             capabilities: {},
-            clientInfo: { name: 'xinchao-dynamic-mind', version: '2.4.0' },
+            clientInfo: { name: 'xinchao-dynamic-mind', version: SYSTEM_VERSION },
           },
         });
         if (!this.sessionId) throw new Error('Ombre MCP did not return a session id');
