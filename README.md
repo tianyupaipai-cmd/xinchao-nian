@@ -1,4 +1,4 @@
-# 心潮·念（Xinchao · Nian）
+# 心潮·念 3.0.1（Xinchao · Nian）
 
 一个会**惦记你**的 AI 心智：**心潮**（动态驱力/欲望引擎）+ **Ombre Brain**（记忆库）深度融合，一键联合部署。
 
@@ -16,11 +16,21 @@ docker compose up -d --build
 - 两服务在同一 docker 网络内部通信，对外只暴露本机端口。
 - 可视化前端使用 [xinchaomind.uk](https://xinchaomind.uk)，不需要直接访问 OB 端口。
 
+## 先分清三个入口
+
+| 入口 | 用来做什么 | 应该填在哪里 | 绝对不要 |
+| --- | --- | --- | --- |
+| `https://xinchaomind.uk` | 公开可视化网页 | 浏览器打开 | 不要当 MCP URL，它也不会替你运行心潮 |
+| `https://你的心潮域名/mcp` | 心潮·念 MCP/OAuth 网关 | Claude / ChatGPT / IDE 的 MCP 连接器 | 不要填 `xinchaomind.uk` 或 OB 地址 |
+| `OMBRE_MCP_URL` | 心潮内部读写 OB 记忆 | 只写在心潮服务端 `.env` | 不要交给公开网页，不要当心潮连接器 |
+
+> 一句话判断：**人打开公开网页，AI 连接心潮 `/mcp`，心潮再在服务器内连接 OB。**
+
 ## 连接 Claude.ai MCP 连接器
 
 心潮·念自带 OAuth 2.1 MCP 端点，可直接作为 Claude.ai 的 MCP 连接器使用。
 
-**重要：连接器必须指向心潮（端口 18110），不是 Ombre Brain（端口 18001）。**
+**重要：连接器必须指向你自己的心潮（端口 18110），不是公开网页，也不是 Ombre Brain（端口 18001）。**
 OB 的 18001 端口仅用于 Dashboard 管理和内部通信，不要把它当 MCP 连接器添加到 Claude.ai。
 
 在 `.env` 中启用并重启：
@@ -107,10 +117,13 @@ AI Runtime。梦境、余韵、思念、内部状态与 AI 自主行动**不允�
 
 ## 许可证与署名
 
-- `xinchao/`（心潮）：MIT。
+- 仓库根的联合发行代码标示为 AGPL-3.0；`xinchao/` 目录仍保留其 MIT 许可文件。
 - `ombre-brain/`（Ombre Brain）：基于 P0luz 的 Ombre Brain 与 Yinglianchun 的 fork，
   **保留其原始许可证与署名**，见 [NOTICE](NOTICE)。本项目对其的修改记录见 `ombre-brain/MODIFICATIONS.md`。
 - 本融合项目**非纯 MIT**；商业使用需取得上游 OB 作者的书面许可。
+
+详细的分目录边界见 [许可说明](docs/LICENSING.md)。根目录的 AGPL 不会覆盖
+`ombre-brain/` 已有的上游非商业约束。
 
 > 详细边界见上游来源说明。融合不改变 OB 原生记忆库功能——breath/hold/grow/dream/trace/
 > anchor/release/forget/restore/purge/I/plan/letter/pulse 与 Dashboard 全部保留。
