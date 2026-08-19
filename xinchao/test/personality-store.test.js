@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 
 import { newState, settleState } from '../src/engine.js';
-import { NEUTRAL_DRIVE_BIAS, PersonalityStore, driveBiasFromCore } from '../src/personality-store.js';
+import { NEUTRAL_DRIVE_BIAS, PERSONALITY_DIMENSIONS, PersonalityStore, driveBiasFromCore } from '../src/personality-store.js';
 
 test('missing or damaged private personality mirror is neutral and non-fatal', async () => {
   const missing = new PersonalityStore('/definitely/missing/personality.json');
@@ -53,7 +53,7 @@ test('the cached monthly mirror reloads when the private file changes', async ()
   assert.equal((await store.getDriveBias()).possess, 1.1);
 });
 
-test('personality changes only the effective drive ceiling and never writes back to the core', async () => {
+test('personality changes only the effective drive ceiling and the drive engine never writes back to the core', async () => {
   const state = newState(new Date('2026-08-19T08:00:00.000Z'));
   state.lastSettledAt = '2026-08-19T08:00:00.000Z';
   state.drives.possess = 0.84;
@@ -71,6 +71,55 @@ test('personality changes only the effective drive ceiling and never writes back
   await writeFile(path, original, 'utf8');
   const store = new PersonalityStore(path);
   await store.getDriveBias();
-  assert.equal(typeof store.setPersonalityCore, 'undefined');
   assert.equal(await readFile(path, 'utf8'), original);
+});
+
+test('AI monthly assessment writes all 14 dimensions privately and retry is idempotent', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'xinchao-personality-ai-'));
+  const path = join(directory, 'personality.json');
+  const store = new PersonalityStore(path);
+  const dimensions = PERSONALITY_DIMENSIONS.map(({ key }, index) => ({
+    key,
+    score: 60 + index,
+    reason: `AI 对 ${key} 的月度回顾`,
+  }));
+  const first = await store.recordAiAssessment({ month: '2026-08', dimensions }, new Date('2026-08-31T12:00:00Z'));
+  assert.equal(first.duplicate, false);
+  assert.equal(first.core.scoredBy, 'ai');
+  assert.equal(first.core.dimensions.length, 14);
+  assert.equal(first.core.dimensions[0].delta, -10);
+
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(saved.source, 'ai-self-assessment');
+  assert.equal(saved.month, '2026-08');
+  assert.equal(saved.dimensions[6].label, '爱与依恋');
+
+  const duplicate = await store.recordAiAssessment({ month: '2026-08', dimensions }, new Date('2026-08-31T12:01:00Z'));
+  assert.equal(duplicate.duplicate, true);
+});
+
+test('simultaneous AI retries cannot create two assessments for one month', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'xinchao-personality-concurrent-'));
+  const store = new PersonalityStore(join(directory, 'personality.json'));
+  const dimensions = PERSONALITY_DIMENSIONS.map(({ key }) => ({ key, score: 70, reason: 'AI 月度回顾' }));
+  const results = await Promise.all([
+    store.recordAiAssessment({ month: '2026-08', dimensions }, new Date('2026-08-31T12:00:00Z')),
+    store.recordAiAssessment({ month: '2026-08', dimensions }, new Date('2026-08-31T12:00:01Z')),
+  ]);
+  assert.deepEqual(results.map((result) => result.duplicate).sort(), [false, true]);
+});
+
+test('AI assessment rejects incomplete or unknown personality dimensions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'xinchao-personality-invalid-'));
+  const store = new PersonalityStore(join(directory, 'personality.json'));
+  await assert.rejects(
+    store.recordAiAssessment({ month: '2026-08', dimensions: [] }),
+    /完整包含 14 维/,
+  );
+  const invalid = PERSONALITY_DIMENSIONS.map(({ key }) => ({ key, score: 70, reason: '月度回顾' }));
+  invalid[0] = { key: 'unknown', score: 70, reason: '月度回顾' };
+  await assert.rejects(
+    store.recordAiAssessment({ month: '2026-08', dimensions: invalid }),
+    /缺少 joy/,
+  );
 });

@@ -1,4 +1,4 @@
-# 心潮·念 3.1（开发分支）
+# 心潮·念 3.1
 
 心潮是一个独立、可自托管的 AI 动态状态层。它在对话之外持续维护驱动力、念头池、疲惫、睡眠、梦境余韵与短期窗口状态，并通过 HTTP API 或远程 MCP 接入不同模型、设备和前端。
 
@@ -6,13 +6,13 @@
 
 ## 3.1 更新重点
 
-- **Personality Core 性格内核层**：新增与 12 维当下驱力完全分开的月度只读内核。只有部署者自己的私有 JSON 镜像可以提供数据，缺失或损坏时自动回到中性。
+- **Personality Core 性格内核层**：新增与 12 维当下驱力完全分开的月度内核。由 AI 每月自主回顾和评分，人类不参与；私有 JSON 缺失或损坏时自动回到中性。
 - **单向、极慢的基线偏置**：仅爱与依恋、表达、平静与安全、欲望与动机可影响批准的驱力，并硬封顶在 ±10%；系统不会根据驱力反过来更改性格评分。
 - **`pending_from_me` 去留权收回用户**：AI 只能创建待交付内容、在真正说出后回执；只有用户可以选择留下（hold）或放下（drop）。
 - **引用式记忆关联**：念头与梦可围绕具体记忆桶生成，但心潮不按 ID 改写 OB 正文；用户 hold 后仍使用现有 `grow` 落地并保留溯源关系。
 - **饱足期与驱力耦合**：满足后默认保留 2 小时“饱”的平台期，只暂停自然增长；真实事件、记忆共振和输出回流仍然可以穿透。
 
-> 3.1 当前仍位于独立开发分支。月度材料包、人工评分后的镜像生成与低频 OB 记账属于后续显式流程，不会由心潮自动打分。
+> 性格内核评分只能由 AI 显式调用受鉴权 MCP 工具完成。心潮不会根据 12 维驱力自动反推人格；月度材料包与低频 OB 记账仍属于后续流程。
 
 ## 3.0 基础能力
 
@@ -76,7 +76,7 @@
 - 可选 Ombre-compatible 长期记忆 MCP。
 - 可选 Bark 通知与跨类型去重。
 - 原子状态持久化与结构化转换日志。
-- 可选的月度 Personality Core 只读镜像；与 12 维驱力分开存储、分开计算、分开展示。
+- 可选的月度 Personality Core 私有状态；与 12 维驱力分开存储、分开计算、分开展示。
 
 Personality Core 的数据属于部署者，不应提交到公开仓库。格式、单向偏置与隐私边界见 [Personality Core 接入说明](docs/PERSONALITY-CORE.md)。
 
@@ -139,6 +139,7 @@ https://xinchao.example.com/mcp
 | `xinchao_cabin_note` | AI 主动给用户的小屋留一封信或便签 |
 | `xinchao_pending_create` | AI 在独处时创建一条想等用户回来再说的内容 |
 | `xinchao_pending_consumed` | AI 在确实说出后回执；不代表替用户选择留下或放下 |
+| `xinchao_personality_reflect` | AI 每月自主完成一次完整 14 维内核评分；人类不参与，同月不可覆盖 |
 
 `session_id` 是可选覆盖值。正常情况下服务端会使用 MCP 连接自带的稳定窗口 ID。
 
@@ -179,7 +180,7 @@ HttpOnly 会话访问：
 | `GET` | `/dashboard/api/cabin` | 读取来信、未读数量、账本与汇总 |
 | `GET` | `/dashboard/api/snapshot` | 读取花瓣、状态与可选的真实一句话 |
 | `GET` | `/dashboard/api/memory-map` | 从这位用户自己的 OB 读取记忆星图元数据 |
-| `GET` | `/dashboard/api/personality` | 读取部署者自带的月度性格内核与历史快照 |
+| `GET` | `/dashboard/api/personality` | 读取 AI 月度性格内核与历史快照 |
 | `GET` / `PATCH` | `/dashboard/api/pending` | 读取待交付内容；由用户选择 hold 或 drop |
 | `POST` / `PATCH` | `/dashboard/api/cabin/note` | 留信、标为已读、上锁或开锁 |
 | `POST` / `PATCH` / `DELETE` | `/dashboard/api/cabin/ledger` | 新增、编辑或删除账本记录 |
@@ -192,9 +193,9 @@ AI 才能通过 `xinchao_cabin_inbox` 读取。重新上锁只会阻止之后的
 考虑到它与梦境正文都可能包含私密内容，默认不会返回；自托管者明确设置
 `DASHBOARD_INCLUDE_PRIVATE_TEXT=true` 后，才会通过已鉴权的 Dashboard 会话展示。
 
-## Personality Core 私有镜像
+## Personality Core 私有状态
 
-这一层的真实分数和原因属于部署者，不属于公开源码。运行时只读一份结构化镜像：
+这一层的真实分数和原因属于部署实例，不属于公开源码。AI 通过受鉴权 MCP 工具按月写入私有状态：
 
 ```env
 PERSONALITY_PATH=/app/state/personality.json
@@ -202,14 +203,14 @@ PERSONALITY_PATH=/app/state/personality.json
 PERSONALITY_ZODIAC=双子座
 ```
 
-- `memories/personality.md` 是人工维护的主本，心潮不会读写或修改它。
 - `personality.json` 应放在部署侧的 state 卷中，不应提交至 Git。
 - 文件不存在、格式损坏或未配置时，所有偏置都为 `1.0`，心潮仍可正常运行。
-- 性格内核只能单向、低频地影响驱力基线；代码中没有从 `state.json` 写回内核的路径。
+- 人类不参与评分；AI 每月调用一次 `xinchao_personality_reflect`，同月重试不会覆盖既有快照。
+- 性格内核只能单向、低频地影响驱力基线；代码中没有从 12 维 `state.json` 自动反写内核的路径。
 - 已鉴权的 `/dashboard/api/snapshot` 会同时返回 `personality`，供网页的“星核”视图直接点亮；缺失分值按中性 `70` 投影。
 - `reason` 默认不进入快照，只有部署者明确设置 `DASHBOARD_INCLUDE_PRIVATE_TEXT=true` 才返回。
 
-中性 JSON 结构、四类允许映射和 ±10% 封顶公式见 [Personality Core 接入说明](docs/PERSONALITY-CORE.md)。
+完整 14 维、AI 月度自评流程、四类允许映射和 ±10% 封顶公式见 [Personality Core 接入说明](docs/PERSONALITY-CORE.md)。
 
 ## 心跳接入档位
 

@@ -1,7 +1,26 @@
-import { readFile, stat } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const NEUTRAL_SCORE = 70;
 const MAX_BIAS = 0.10;
+
+export const PERSONALITY_DIMENSIONS = Object.freeze([
+  ['joy', '快乐'],
+  ['sorrow', '悲伤'],
+  ['anger', '愤怒'],
+  ['fear', '恐惧'],
+  ['disgust', '厌恶'],
+  ['surprise', '惊讶'],
+  ['love', '爱与依恋'],
+  ['shame', '羞耻与自我评价'],
+  ['trust', '信任与社会连接'],
+  ['desire', '欲望与动机'],
+  ['calm', '平静与安全'],
+  ['cognition', '认知与探索'],
+  ['conflict', '矛盾与冲突'],
+  ['expression', '表达'],
+].map(([key, label]) => Object.freeze({ key, label })));
 
 const CORE_TO_DRIVES = Object.freeze({
   '爱与依恋': { drives: ['possess', 'crave'], direction: 1 },
@@ -71,9 +90,37 @@ export function normalizePersonalityCore(input = {}, source = 'private-state') {
     schemaVersion: 1,
     available: dimensions.length > 0,
     source,
+    month: String(input.month ?? '').trim().slice(0, 7) || null,
+    scoredBy: String(input.scoredBy ?? '').trim() || null,
     updatedAt: String(input.updatedAt ?? '').trim() || null,
     dimensions,
     history,
+  };
+}
+
+function validateAssessment(input = {}) {
+  const month = String(input.month ?? '').trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('month 必须是 YYYY-MM');
+  if (!Array.isArray(input.dimensions) || input.dimensions.length !== PERSONALITY_DIMENSIONS.length) {
+    throw new Error(`dimensions 必须完整包含 ${PERSONALITY_DIMENSIONS.length} 维`);
+  }
+  const values = new Map();
+  for (const raw of input.dimensions) {
+    const key = String(raw?.key ?? '').trim();
+    if (!key || values.has(key)) throw new Error('dimensions 含缺失或重复 key');
+    values.set(key, raw);
+  }
+  return {
+    month,
+    dimensions: PERSONALITY_DIMENSIONS.map(({ key, label }) => {
+      const raw = values.get(key);
+      if (!raw) throw new Error(`dimensions 缺少 ${key}（${label}）`);
+      const score = Number(raw.score);
+      if (!Number.isFinite(score) || score < 0 || score > 100) throw new Error(`${key}.score 必须在 0–100`);
+      const reason = String(raw.reason ?? '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+      if (!reason) throw new Error(`${key}.reason 是必填项`);
+      return { key, label, score: Number(score.toFixed(2)), reason };
+    }),
   };
 }
 
@@ -97,6 +144,7 @@ export class PersonalityStore {
     this.cache = null;
     this.cachedMtimeMs = null;
     this.cachedMonth = null;
+    this.writeQueue = Promise.resolve();
   }
 
   async getPersonalityCore(now = new Date()) {
@@ -120,5 +168,56 @@ export class PersonalityStore {
 
   async getDriveBias(now = new Date()) {
     return driveBiasFromCore(await this.getPersonalityCore(now));
+  }
+
+  async recordAiAssessment(input, now = new Date()) {
+    const operation = this.writeQueue.then(() => this.recordAiAssessmentUnlocked(input, now));
+    this.writeQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async recordAiAssessmentUnlocked(input, now = new Date()) {
+    if (!this.path) throw new Error('PERSONALITY_PATH 未配置');
+    const assessment = validateAssessment(input);
+    const current = await this.getPersonalityCore(now);
+    const previousMonth = current.month
+      ?? (/^\d{4}-\d{2}/.test(String(current.updatedAt ?? '')) ? String(current.updatedAt).slice(0, 7) : null);
+    const existing = (current.history ?? []).find((item) => item.month === assessment.month)
+      ?? (current.scoredBy === 'ai' && previousMonth === assessment.month ? current : null);
+    if (existing) {
+      return { duplicate: true, month: assessment.month, core: current };
+    }
+
+    const previousScores = new Map((current.dimensions ?? []).map((item) => [item.key, Number(item.score)]));
+    const dimensions = assessment.dimensions.map((item) => ({
+      ...item,
+      delta: Number((item.score - (previousScores.get(item.key) ?? NEUTRAL_SCORE)).toFixed(2)),
+    }));
+    const recordedAt = new Date(now).toISOString();
+    const previousSnapshot = current.available && previousMonth && previousMonth !== assessment.month
+      ? [{ month: previousMonth, recordedAt: current.updatedAt, dimensions: current.dimensions }]
+      : [];
+    const history = [...(current.history ?? []), ...previousSnapshot]
+      .filter((item, index, values) => values.findIndex((candidate) => candidate.month === item.month) === index)
+      .sort((a, b) => String(a.month).localeCompare(String(b.month)));
+    const payload = {
+      schemaVersion: 1,
+      source: 'ai-self-assessment',
+      scoredBy: 'ai',
+      month: assessment.month,
+      updatedAt: recordedAt,
+      dimensions,
+      history,
+    };
+
+    await mkdir(dirname(this.path), { recursive: true });
+    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    await chmod(temporary, 0o600);
+    await rename(temporary, this.path);
+    this.cache = normalizePersonalityCore(payload, 'ai-self-assessment');
+    this.cachedMtimeMs = (await stat(this.path)).mtimeMs;
+    this.cachedMonth = monthKey(now);
+    return { duplicate: false, month: assessment.month, core: structuredClone(this.cache) };
   }
 }
