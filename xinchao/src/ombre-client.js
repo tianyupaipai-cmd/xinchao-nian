@@ -79,31 +79,43 @@ export class OmbreClient {
   }
 
   async recentMaterial(drives = []) {
+    return (await this.recentMaterialWithRefs(drives)).text;
+  }
+
+  async recentMaterialWithRefs(drives = []) {
     const result = await this.call('breath', {
       query: withDriveHint('近期重要记忆、情绪、关系变化和未完成事项', drives),
       max_results: this.config.breathMaxResults,
       max_tokens: this.config.breathMaxTokens
     });
-    return extractText(result).slice(0, 10000);
+    return materialWithRefs(extractText(result), 10000);
   }
 
   async daytimeMaterial(drives = []) {
+    return (await this.daytimeMaterialWithRefs(drives)).text;
+  }
+
+  async daytimeMaterialWithRefs(drives = []) {
     const result = await this.call('breath', {
       query: withDriveHint('白天自然浮现的近期记忆、具体细节、未说完的话和当下牵挂；不要返回系统配置或技术信息', drives),
       max_results: this.config.breathMaxResults,
       max_tokens: this.config.breathMaxTokens
     });
-    return extractText(result).slice(0, 10000);
+    return materialWithRefs(extractText(result), 10000);
   }
 
   // 自主念头用的材料：比日间浮现更短，只要能让念头落到具体的事上。
   async thoughtMaterial(drives = []) {
+    return (await this.thoughtMaterialWithRefs(drives)).text;
+  }
+
+  async thoughtMaterialWithRefs(drives = []) {
     const result = await this.call('breath', {
       query: withDriveHint('此刻自然想起的一件具体的事：最近的共同经历、说过的话或还惦记着的东西；不要返回系统配置、部署或技术信息', drives),
       max_results: Math.max(1, Math.min(3, Number(this.config.breathMaxResults) || 2)),
       max_tokens: Math.max(200, Math.min(600, Number(this.config.breathMaxTokens) || 400))
     });
-    return extractText(result).slice(0, 4000);
+    return materialWithRefs(extractText(result), 4000);
   }
 
   async recentContinuityMaterial(maxTokens = this.config.breathMaxTokens) {
@@ -147,6 +159,53 @@ export class OmbreClient {
     if (response.status === 404) return emptyMemoryPreview(id, 'not_found');
     if (!response.ok) throw new Error(`Ombre preview failed: HTTP ${response.status}`);
     return parseMemoryPreviewText(JSON.stringify({ ok: true, ...(await response.json()) }), id, maxLines);
+  }
+
+  async memoryBucketPreviews(bucketIds = [], maxLines = 7) {
+    const ids = [...new Set((Array.isArray(bucketIds) ? bucketIds : [])
+      .map(String).map((id) => id.trim()).filter(Boolean))].slice(0, 8);
+    const previews = [];
+    for (const id of ids) {
+      const item = await this.memoryBucketPreview(id, maxLines);
+      if (item.available && item.preview) previews.push(item);
+    }
+    return previews;
+  }
+
+  // 用户显式 hold 后，新产出仍走 OB 现有 grow；心潮不按 ID 改写源桶正文。
+  async storeHeldOutput(item) {
+    if (!this.config.writeEnabled) throw new Error('ombre_write_disabled');
+    const content = String(item?.content ?? '').trim();
+    if (!content) throw new Error('pending_content_empty');
+    const result = await this.call('grow', {
+      content,
+      source: 'xinchao-pending-hold',
+    });
+    const text = extractText(result);
+    const bucketId = parseGrowBucketIds(text)[0] ?? null;
+    if (!bucketId) throw new Error('ombre_grow_missing_bucket_id');
+    return bucketId;
+  }
+
+  // 只用 OB 已有 trace 记一条来源关系；不改正文、不强制 anchor、不新增 OB 写能力。
+  async traceHeldOutputSources(outputBucketId, sourceBucketIds = []) {
+    if (!this.config.writeEnabled) throw new Error('ombre_write_disabled');
+    const outputId = String(outputBucketId ?? '').trim();
+    const sourceIds = [...new Set((Array.isArray(sourceBucketIds) ? sourceBucketIds : [])
+      .map(String).map((id) => id.trim()).filter((id) => id && id !== outputId))].slice(0, 8);
+    const linked = [];
+    for (const sourceId of sourceIds) {
+      const result = await this.call('trace', {
+        bucket_id: sourceId,
+        meaning_append: `心潮延续：这段记忆后来生出一条被用户留下的独处产出（${outputId}）。`,
+      });
+      const text = extractText(result);
+      if (/^(未找到记忆桶|修改失败)/.test(text.trim())) {
+        throw new Error(`ombre_trace_failed:${sourceId}`);
+      }
+      linked.push(sourceId);
+    }
+    return linked;
   }
 
   async storeDream(dream) {
@@ -208,6 +267,53 @@ export function parseSurfacedDomains(text) {
     }
   }
   return domains;
+}
+
+// OB breath 2.6.5+ 每个浮现桶的表头都带 [bucket_id:...]。
+// 只取表头里的 ID，不从正文猜，避免把记忆里偶然出现的字符串误当成来源桶。
+// 老版 OB 没有这个元数据时返回空数组，不影响旧调用者。
+export function parseSurfacedBucketIds(text) {
+  const ids = [];
+  const seen = new Set();
+  const re = /\[bucket_id:([A-Za-z0-9._-]{1,160})\]/g;
+  let match;
+  while ((match = re.exec(String(text ?? ''))) !== null) {
+    const id = match[1].trim();
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+export function materialWithRefs(text, maxChars = 10000) {
+  const limited = String(text ?? '').slice(0, Math.max(0, Number(maxChars) || 0));
+  return {
+    text: limited,
+    bucketIds: parseSurfacedBucketIds(limited),
+    domains: parseSurfacedDomains(limited),
+  };
+}
+
+// grow 返回的人类可读结果中，真实桶 ID 只出现在“→”或每条 📎/📝 之后。
+// 明确排除 batch:g_... 和正文中的偶然字符串，不做宽泛 ID 猜测。
+export function parseGrowBucketIds(text) {
+  const ids = [];
+  const seen = new Set();
+  const source = String(text ?? '');
+  const patterns = [/(?:→|[📎📝])\s*([A-Za-z0-9._-]{6,160})/g];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(source)) !== null) {
+      const id = match[1].trim();
+      if (!seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+  }
+  return ids;
 }
 
 function parseMcp(text) {
