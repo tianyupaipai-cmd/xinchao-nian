@@ -21,6 +21,8 @@ import { CabinStore } from './cabin-store.js';
 import { boardEnabled, postBoardMessage, readBoardMessages } from './board-client.js';
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
+import { PersonalityStore } from './personality-store.js';
+import { addPending, dropPending, holdPending, markConsumed, markDelivered, markHoldSyncResult, selectForHoldSync } from './pending-queue.js';
 
 const config = validateConfig(loadConfig());
 if (!config.serviceToken) throw new Error('SERVICE_TOKEN is required');
@@ -45,6 +47,7 @@ const dashboardAuth = new DashboardAuth({
 });
 const bridgeQueue = new BridgeQueue(config.bridge.statePath, config.bridge);
 const cabin = new CabinStore(config.cabin.statePath, config.cabin);
+const personality = new PersonalityStore(config.personalityPath);
 const bridgeStreams = new Set();
 await oauth.init();
 let cyclePromise = null;
@@ -102,18 +105,79 @@ async function synchronizeOmbreHeartbeat() {
   return state;
 }
 
+async function synchronizeHeldPending(limit = 3, now = new Date()) {
+  const snapshot = await store.read();
+  const items = selectForHoldSync(snapshot, limit);
+  for (const item of items) {
+    let bucketId = String(item.holdSync?.landedBucketId ?? item.ombreBucketId ?? '').trim();
+    const alreadyLinked = new Set(item.holdSync?.linkedSourceBucketIds ?? []);
+    let newlyLinked = [];
+    try {
+      if (!config.ombre.writeEnabled) throw new Error('ombre_write_disabled');
+      if (!bucketId) bucketId = await ombre.storeHeldOutput(item);
+      const missingSources = (item.sourceOmbreBucketIds ?? [])
+        .filter((id) => id && id !== bucketId && !alreadyLinked.has(id));
+      if (missingSources.length) {
+        newlyLinked = await ombre.traceHeldOutputSources(bucketId, missingSources);
+      }
+      await updateState({
+        type: 'pending_hold_synced', source: 'pending-hold', details: { pendingId: item.id }, at: now,
+      }, (state) => {
+        markHoldSyncResult(state, item.id, {
+          ok: true,
+          ombreBucketId: bucketId,
+          linkedSourceBucketIds: newlyLinked,
+        }, now);
+        state.revision = Number(state.revision ?? 0) + 1;
+        return state;
+      });
+    } catch (error) {
+      await updateState({
+        type: 'pending_hold_retry', source: 'pending-hold', details: { pendingId: item.id }, at: now,
+      }, (state) => {
+        markHoldSyncResult(state, item.id, {
+          ok: false,
+          ombreBucketId: bucketId || null,
+          linkedSourceBucketIds: newlyLinked,
+          error: error.message,
+        }, now);
+        state.revision = Number(state.revision ?? 0) + 1;
+        return state;
+      });
+      log('pending_hold_sync_failed', { pendingId: item.id, message: error.message });
+    }
+  }
+  return items.length;
+}
+
+async function materialFromReferencedBuckets(recalled, maxLines = 7) {
+  const ids = recalled?.bucketIds ?? [];
+  if (!ids.length) return recalled?.text ?? '';
+  try {
+    const previews = await ombre.memoryBucketPreviews(ids, maxLines);
+    const domains = [...new Set(recalled?.domains ?? [])];
+    const domainMeta = domains.length ? `[domain:${domains.join(',')}]\n` : '';
+    const text = previews.map((item) => `${domainMeta}[bucket_id:${item.id}]\n${item.preview}`).join('\n\n');
+    return text || recalled?.text || '';
+  } catch (error) {
+    log('ombre_preview_failed', { count: ids.length, message: error.message });
+    return recalled?.text ?? '';
+  }
+}
+
 async function runCycle() {
   if (cyclePromise) return cyclePromise;
   cyclePromise = (async () => {
     const now = new Date();
     await synchronizeOmbreHeartbeat();
+    const driveBias = await personality.getDriveBias(now);
     let settled;
     await updateState({
       type: 'settle',
       source: 'timer',
       at: now,
     }, (state) => {
-      settled = settleState(state, now, config.sleepAfterMinutes, config.settle);
+      settled = settleState(state, now, config.sleepAfterMinutes, { ...config.settle, driveBias });
       return settled.state;
     });
 
@@ -144,8 +208,13 @@ async function runCycle() {
 
     if (config.dreamEnabled && dreamAllowed(state, now, config.dreamMinIntervalHours, config.dreamMaxPerDay)) {
       let material = '';
+      let sourceOmbreBucketIds = [];
       if (!config.shadowMode && config.ombre.readEnabled) {
-        try { material = await ombre.recentMaterial(topDrives(state)); }
+        try {
+          const recalled = await ombre.recentMaterialWithRefs(topDrives(state));
+          sourceOmbreBucketIds = recalled.bucketIds;
+          material = await materialFromReferencedBuckets(recalled);
+        }
         catch (error) { log('ombre_read_failed', { message: error.message }); }
       }
 
@@ -161,7 +230,15 @@ async function runCycle() {
         }
       }
 
-      const dream = { id: randomUUID(), createdAt: now.toISOString(), ...generated, ombreBucketId: null };
+      const dream = {
+        id: randomUUID(),
+        createdAt: now.toISOString(),
+        ...generated,
+        // ombreBucketId 保持旧语义：这场梦写入 OB 后自己的桶。
+        ombreBucketId: null,
+        // 新字段只记梦由哪些真实记忆长出，老状态没有它也完全可读。
+        sourceOmbreBucketIds,
+      };
       if (!config.shadowMode && config.ombre.writeEnabled) {
         try { dream.ombreBucketId = await ombre.storeDream(dream); }
         catch (error) { log('ombre_write_failed', { message: error.message }); }
@@ -235,8 +312,13 @@ async function runCycle() {
       // 只取一次：selectUniqueBark 去重失败时会重试生成，材料跟着重取的话
       // 一条通知能打出好几次 OB 往返，而浮现的东西本来就该是同一件事。
       let thoughtMaterial = '';
+      let thoughtSourceBucketIds = [];
       if (config.ombre.readEnabled) {
-        try { thoughtMaterial = await ombre.thoughtMaterial(topDrives(state)); }
+        try {
+          const recalled = await ombre.thoughtMaterialWithRefs(topDrives(state));
+          thoughtSourceBucketIds = recalled.bucketIds;
+          thoughtMaterial = await materialFromReferencedBuckets(recalled, 5);
+        }
         catch (error) { log('ombre_read_failed', { message: error.message }); }
       }
       if (config.resonance.enabled && thoughtMaterial) {
@@ -293,7 +375,17 @@ async function runCycle() {
                   source: 'reflux',
                   details: { kind: 'autonomous_thought', drive: expressed.key },
                   at: now,
-                }, (latest) => applyOutputReflux(latest, expressed.key, selected.message, now, config.reflux.amount).state);
+                }, (latest) => applyOutputReflux(
+                  latest,
+                  expressed.key,
+                  selected.message,
+                  now,
+                  config.reflux.amount,
+                  {
+                    ombreBucketId: thoughtSourceBucketIds[0] ?? null,
+                    sourceOmbreBucketIds: thoughtSourceBucketIds,
+                  },
+                ).state);
                 log('output_reflux', { kind: 'autonomous_thought', drive: expressed.key, revision: state.revision });
               }
             }
@@ -312,7 +404,8 @@ async function runCycle() {
     } else if (!config.shadowMode && config.daytime.enabled && config.ombre.readEnabled && config.bark.enabled && daytimeEmergenceAllowed(state, now, config.daytime)) {
       let selected = { message: '', candidate: { source: 'none' }, reason: 'empty', attempts: 1 };
       try {
-        const material = await ombre.daytimeMaterial(topDrives(state));
+        const recalled = await ombre.daytimeMaterialWithRefs(topDrives(state));
+        const material = await materialFromReferencedBuckets(recalled, 5);
         if (config.resonance.enabled && material) {
           const domains = parseSurfacedDomains(material);
           if (domains.length) {
@@ -358,7 +451,17 @@ async function runCycle() {
                   source: 'reflux',
                   details: { kind: 'daytime_emergence', drive: expressed.key },
                   at: now,
-                }, (latest) => applyOutputReflux(latest, expressed.key, selected.message, now, config.reflux.amount).state);
+                }, (latest) => applyOutputReflux(
+                  latest,
+                  expressed.key,
+                  selected.message,
+                  now,
+                  config.reflux.amount,
+                  {
+                    ombreBucketId: recalled.bucketIds[0] ?? null,
+                    sourceOmbreBucketIds: recalled.bucketIds,
+                  },
+                ).state);
                 log('output_reflux', { kind: 'daytime_emergence', drive: expressed.key, revision: state.revision });
               }
             }
@@ -376,6 +479,7 @@ async function runCycle() {
       }, (latest) => scheduleDaytimeEmergence(latest, now, config.daytime.minIntervalHours, config.daytime.maxIntervalHours));
       log('daytime_emergence_scheduled', { nextAt: state.nextDaytimeEmergenceAt, revision: state.revision });
     }
+    await synchronizeHeldPending(3, now);
     return { state, dreamCreated, barkSent, daytimeSent };
   })().finally(() => { cyclePromise = null; });
   return cyclePromise;
@@ -501,7 +605,12 @@ function dashboardTimelineOptions(url) {
 
 async function dashboardPayload(pathname, url) {
   if (pathname.endsWith('/snapshot')) {
-    return buildDashboardSnapshot(await store.read(), config, new Date());
+    const now = new Date();
+    const [state, personalityCore] = await Promise.all([
+      store.read(),
+      personality.getPersonalityCore(now),
+    ]);
+    return buildDashboardSnapshot(state, config, now, personalityCore);
   }
   if (pathname.endsWith('/timeline')) {
     return {
@@ -565,6 +674,15 @@ async function dashboardPayload(pathname, url) {
   }
   if (pathname.endsWith('/connect')) return buildConnectionManifest(config);
   if (pathname.endsWith('/cabin')) return cabin.snapshot();
+  if (pathname.endsWith('/personality')) return personality.getPersonalityCore();
+  if (pathname.endsWith('/pending')) {
+    const state = await store.read();
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      items: (state.pending ?? []).map((item) => structuredClone(item)),
+    };
+  }
   return null;
 }
 
@@ -618,6 +736,8 @@ async function createContextEnvelope({
     timeZone: config.settle.timeZone,
   });
   if (envelope.delivered) {
+    const pendingIds = envelope.sections
+      .find((section) => section.id === 'pending_from_me')?.data?.ids ?? [];
     state = await updateState({
       type: 'context_delivery',
       source: 'context-adapter',
@@ -631,12 +751,18 @@ async function createContextEnvelope({
         sectionCount: envelope.sections.length,
       },
       at: now,
-    }, (current) => recordContextDelivery(current, {
-      sessionId,
-      mode,
-      digest: envelope.digest,
-      deliveredAt: now,
-    }));
+    }, (current) => {
+      const next = recordContextDelivery(current, {
+        sessionId,
+        mode,
+        digest: envelope.digest,
+        deliveredAt: now,
+      });
+      if (pendingIds.length && markDelivered(next, pendingIds, now)) {
+        next.revision = Number(next.revision ?? 0) + 1;
+      }
+      return next;
+    });
   }
   try {
     await journal.recordContext({
@@ -659,6 +785,7 @@ async function createContextEnvelope({
 async function recordConversationEvent(event, source = 'api', now = new Date()) {
   let applied;
   const auditDetails = {};
+  const driveBias = await personality.getDriveBias(now);
   const state = await updateState({
     type: source === 'heartbeat' ? 'conversation_heartbeat' : 'conversation_event',
     source: source === 'mcp' ? 'mcp' : 'api',
@@ -669,7 +796,7 @@ async function recordConversationEvent(event, source = 'api', now = new Date()) 
   }, (current) => {
     applied = settleAndApplyConversationEvent(current, event, now, {
       sleepAfterMinutes: config.sleepAfterMinutes,
-      settle: config.settle,
+      settle: { ...config.settle, driveBias },
       interaction: config.interaction,
       // 作息预期只从她真实的到来学习，心跳不算。
       recordArrival: config.anticipation.enabled && source !== 'heartbeat',
@@ -694,6 +821,33 @@ async function recordConversationEvent(event, source = 'api', now = new Date()) 
     interaction: applied.interaction,
     settledHours: Number(applied.settled.elapsedHours.toFixed(4)),
   };
+}
+
+async function createPendingOutput(input, source = 'mcp', now = new Date()) {
+  let item;
+  let duplicate = false;
+  const state = await updateState({
+    type: 'pending_created', source, details: { kind: input.kind }, at: now,
+  }, (current) => {
+    const beforeIds = new Set((current.pending ?? []).map((entry) => entry.id));
+    item = addPending(current, input, now);
+    duplicate = Boolean(item && beforeIds.has(item.id));
+    if (item) current.revision = Number(current.revision ?? 0) + 1;
+    return current;
+  });
+  return { item, duplicate, revision: state.revision };
+}
+
+async function consumePendingOutputs(ids, source = 'mcp', now = new Date()) {
+  let consumed = [];
+  const state = await updateState({
+    type: 'pending_consumed', source, details: { count: ids.length }, at: now,
+  }, (current) => {
+    consumed = markConsumed(current, ids, now);
+    if (consumed.length) current.revision = Number(current.revision ?? 0) + 1;
+    return current;
+  });
+  return { consumed, revision: state.revision };
 }
 
 async function saveHandoffNote(note, source = 'mcp', now = new Date()) {
@@ -888,6 +1042,44 @@ const server = createServer(async (request, response) => {
           return send(response, 400, { error: error.message });
         }
       }
+      if (url.pathname === '/dashboard/api/pending') {
+        if (request.method === 'GET') {
+          return send(response, 200, await dashboardPayload(url.pathname, url));
+        }
+        if (request.method === 'PATCH') {
+          try {
+            const payload = await body(request);
+            const ids = Array.isArray(payload.ids)
+              ? [...new Set(payload.ids.map(String).map((id) => id.trim()).filter(Boolean))].slice(0, 12)
+              : [];
+            if (!ids.length) return send(response, 400, { error: 'ids required' });
+            let affected = [];
+            const action = String(payload.action ?? '').trim().toLowerCase();
+            let state = await updateState({
+              type: action === 'hold' ? 'pending_held' : 'pending_dropped',
+              source: 'dashboard',
+              details: { action, count: ids.length },
+              at: new Date(),
+            }, (current) => {
+              if (action === 'hold') affected = holdPending(current, ids);
+              else if (action === 'drop') affected = dropPending(current, ids);
+              else throw new Error('action must be hold or drop');
+              if (affected.length) current.revision = Number(current.revision ?? 0) + 1;
+              return current;
+            });
+            if (action === 'hold' && affected.length) {
+              await synchronizeHeldPending(affected.length);
+              // hold 可能紧接着完成 OB 落地/失败重试记账；返回最新修订号，
+              // 避免 Dashboard 用过期 revision 覆盖刚刚发生的同步结果。
+              state = await store.read();
+            }
+            return send(response, 200, { action, affected, revision: state.revision });
+          } catch (error) {
+            return send(response, 400, { error: error.message });
+          }
+        }
+        return send(response, 405, { error: 'method not allowed' }, { Allow: 'GET, PATCH' });
+      }
       if (url.pathname === '/dashboard/api/bridge/deliveries') {
         if (!config.bridge.enabled) return send(response, 503, { error: 'bridge disabled' });
         if (request.method === 'GET') {
@@ -1029,6 +1221,9 @@ const server = createServer(async (request, response) => {
           };
         },
         handoffNote: async (note) => saveHandoffNote(note, 'mcp'),
+        pendingCreate: async (input) => createPendingOutput(input, 'mcp'),
+        pendingConsumed: async ({ ids }) => consumePendingOutputs(ids, 'mcp'),
+        personalityReflect: async (input) => personality.recordAiAssessment(input),
         cabinInbox: async () => cabin.unlockedUserNotes(),
         cabinNote: async (note) => cabin.addNote({ ...note, from: 'ai', locked: false }),
         // 公共留言板：只有配了令牌才把 board_post / board_read 工具暴露出来 / 接受调用。

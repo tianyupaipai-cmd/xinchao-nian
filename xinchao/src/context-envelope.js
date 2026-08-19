@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives } from './engine.js';
 import { renderHandoffNotes } from './handoff-notes.js';
+import { renderPending, selectForDelivery } from './pending-queue.js';
 
 const VALID_MODES = new Set(['session_start', 'turn', 'inspect']);
 
@@ -239,6 +240,24 @@ export function buildContextEnvelope({
       content: handoffText,
     });
   }
+  const pendingItems = selectForDelivery(state);
+  if (pendingItems.length) {
+    sections.push({
+      id: 'pending_from_me',
+      source: 'xinchao',
+      ttl: 'until-consumed',
+      content: renderPending(pendingItems),
+      data: {
+        ids: pendingItems.map((item) => item.id),
+        items: pendingItems.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          createdAt: item.createdAt,
+          content: item.content,
+        })),
+      },
+    });
+  }
   const continuity = compact(ombreText);
   if (continuity) {
     sections.push({
@@ -263,6 +282,7 @@ export function buildContextEnvelope({
     handoff_notes: '近期交接便签（非原文）',
     dream_residue: '梦境余韵',
     recent_continuity: '近期连续性（不替代基岩）',
+    pending_from_me: '我独处时攒下的话（说出后请回执）',
   };
   let remaining = tokenBudget;
   const renderedSections = [];
@@ -296,5 +316,4 @@ export function buildContextEnvelope({
     digest,
   };
 }
-
 

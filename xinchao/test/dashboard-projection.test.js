@@ -39,3 +39,40 @@ test('dashboard exposes only the strongest real sentence per drive after opt-in'
     },
   ]);
 });
+
+test('dashboard snapshot projects personality core without private reasons by default', () => {
+  const core = {
+    updatedAt: '2026-08-19T08:00:00.000Z',
+    history: [{ month: '2026-07' }, { month: '2026-08' }],
+    dimensions: [
+      { key: 'love', label: '爱与依恋', score: 83, delta: 2, reason: 'AI 私密月度回顾' },
+      { key: 'expression', label: '表达', score: undefined, delta: undefined, reason: '不应出现' },
+    ],
+  };
+  const snapshot = buildDashboardSnapshot(
+    state,
+    { dashboard: { includePrivateText: false }, personality: { zodiac: '双子座' } },
+    new Date('2026-08-19T09:00:00.000Z'),
+    core,
+  );
+  assert.deepEqual(snapshot.personality, {
+    available: true,
+    constellation: '双子座',
+    month: '2026-08',
+    updatedAt: '2026-08-19T08:00:00.000Z',
+    dimensions: [
+      { key: 'love', label: '爱与依恋', score: 83, delta: 2 },
+      { key: 'expression', label: '表达', score: 70, delta: 0 },
+    ],
+  });
+});
+
+test('dashboard includes personality reasons only after private-text opt-in', () => {
+  const snapshot = buildDashboardSnapshot(
+    state,
+    { dashboard: { includePrivateText: true } },
+    new Date(),
+    { dimensions: [{ key: 'love', label: '爱与依恋', score: 80, delta: 1, reason: 'AI 私密评分原因' }] },
+  );
+  assert.equal(snapshot.personality.dimensions[0].reason, 'AI 私密评分原因');
+});

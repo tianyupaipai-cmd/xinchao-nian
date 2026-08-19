@@ -100,7 +100,26 @@ function activeSessionCount(state, now) {
   }).length;
 }
 
-export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()) {
+function projectedPersonality(core = {}, config = {}) {
+  const dimensions = Array.isArray(core?.dimensions) ? core.dimensions : [];
+  const history = Array.isArray(core?.history) ? core.history : [];
+  const includePrivateText = Boolean(config.dashboard?.includePrivateText);
+  return {
+    available: dimensions.length > 0,
+    constellation: compact(config.personality?.zodiac, 40) || null,
+    month: compact(core?.month ?? history.at(-1)?.month, 7) || null,
+    updatedAt: validDate(core?.updatedAt),
+    dimensions: dimensions.map((dimension) => ({
+      key: compact(dimension?.key, 80),
+      label: compact(dimension?.label, 80),
+      score: Number.isFinite(Number(dimension?.score)) ? Number(dimension.score) : 70,
+      delta: Number.isFinite(Number(dimension?.delta)) ? Number(dimension.delta) : 0,
+      ...(includePrivateText ? { reason: compact(dimension?.reason, 1200) } : {}),
+    })).filter((dimension) => dimension.key || dimension.label),
+  };
+}
+
+export function buildDashboardSnapshot(state = {}, config = {}, now = new Date(), personalityCore = {}) {
   const generatedAt = new Date(now);
   const drives = projectedDrives(state);
   const lastPresenceAt = validDate(state.lastHeartbeatAt ?? state.lastConversationAt);
@@ -133,6 +152,7 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
     },
     drives,
     topDrives,
+    personality: projectedPersonality(personalityCore, config),
     thoughts: projectedThoughts(state, Boolean(config.dashboard?.includePrivateText)),
     dreams: projectedDreams(
       state,

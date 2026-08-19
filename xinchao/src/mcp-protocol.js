@@ -1,4 +1,6 @@
 import { SYSTEM_VERSION } from './version.js';
+import { PENDING_KINDS } from './pending-queue.js';
+import { PERSONALITY_DIMENSIONS } from './personality-store.js';
 
 const SUPPORTED_PROTOCOLS = new Set(['2025-03-26', '2025-06-18']);
 const INTERACTION_TYPES = new Set([
@@ -197,6 +199,79 @@ export const XINCHAO_TOOLS = [
       idempotentHint: true,
       openWorldHint: false,
     },
+  },
+  {
+    name: 'xinchao_pending_create',
+    title: '攒一件等你回来说的事',
+    description: [
+      '保存一条你独处时产生的第一人称念头，等用户回来时送达给窗口。',
+      '这只是创建待交付条目；你不能替用户决定留下或放下。',
+      '不要放聊天原文、密钥、隐私或技术日志。',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: [...PENDING_KINDS] },
+        content: { type: 'string', minLength: 1, maxLength: 600 },
+        weight: { type: 'number', minimum: 0, maximum: 1, default: 0.5 },
+        source_ombre_bucket_ids: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, maxLength: 160 },
+          maxItems: 8,
+          description: '这条念头围绕的 OB 来源桶 id；只做引用与追溯。',
+        },
+      },
+      required: ['kind', 'content'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'xinchao_pending_consumed',
+    title: '回执已经说出口',
+    description: '当你确实在窗口里把 pending_from_me 的内容告诉用户后，用原 id 回执。回执不等于替用户决定留下或放下。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 160 }, minItems: 1, maxItems: 12 },
+      },
+      required: ['ids'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'xinchao_personality_reflect',
+    title: '完成月度性格内核自评',
+    description: [
+      '由 AI 自己完成一次月度 14 维性格内核评估，并写入部署侧私有 personality.json。人类不参与打分。',
+      '必须一次提交完整 14 维，每维包含 0–100 分和简短理由；同一月份重复调用只返回原结果，不覆盖历史。',
+      '这不是根据 12 维驱力自动反推性格：评分应来自 AI 对本月自身经历的审慎回顾。私人理由默认不会进入 Dashboard 快照。',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        month: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$', description: '评估月份，格式 YYYY-MM。' },
+        dimensions: {
+          type: 'array',
+          minItems: 14,
+          maxItems: 14,
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', enum: PERSONALITY_DIMENSIONS.map((item) => item.key) },
+              score: { type: 'number', minimum: 0, maximum: 100 },
+              reason: { type: 'string', minLength: 1, maxLength: 1200 },
+            },
+            required: ['key', 'score', 'reason'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['month', 'dimensions'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'xinchao_cabin_inbox',
@@ -402,6 +477,36 @@ function cabinNoteArgs(args = {}) {
   return { eventId, content, timestamp: args.timestamp ?? null };
 }
 
+function pendingCreateArgs(args = {}) {
+  const kind = String(args.kind ?? '').trim();
+  if (!PENDING_KINDS.includes(kind)) throw new Error('kind 不在允许范围内');
+  const content = String(args.content ?? '').trim().slice(0, 600);
+  if (!content) throw new Error('content 是必填项');
+  return {
+    kind,
+    content,
+    weight: Math.max(0, Math.min(1, numberOr(args.weight, 0.5))),
+    sourceOmbreBucketIds: Array.isArray(args.source_ombre_bucket_ids)
+      ? args.source_ombre_bucket_ids.map(String).map((id) => id.trim()).filter(Boolean).slice(0, 8)
+      : [],
+  };
+}
+
+function pendingConsumedArgs(args = {}) {
+  const ids = Array.isArray(args.ids)
+    ? [...new Set(args.ids.map(String).map((id) => id.trim()).filter(Boolean))].slice(0, 12)
+    : [];
+  if (!ids.length) throw new Error('ids 是必填项');
+  return { ids };
+}
+
+function personalityReflectArgs(args = {}) {
+  return {
+    month: String(args.month ?? '').trim(),
+    dimensions: Array.isArray(args.dimensions) ? args.dimensions : [],
+  };
+}
+
 async function callTool(name, args, handlers) {
   const fallbackSessionId = handlers.defaultSessionId ?? '';
   if (name === 'xinchao_context') {
@@ -428,6 +533,24 @@ async function callTool(name, args, handlers) {
     return toolText(
       `近期交接便签已接收：revision=${result.revision}${duplicate}`,
       result,
+    );
+  }
+  if (name === 'xinchao_pending_create') {
+    const result = await handlers.pendingCreate(pendingCreateArgs(args));
+    return toolText(`已攒下：id=${result.item.id}${result.duplicate ? ' duplicate=true' : ''}`, result);
+  }
+  if (name === 'xinchao_pending_consumed') {
+    const result = await handlers.pendingConsumed(pendingConsumedArgs(args));
+    return toolText(`已回执说出口：${result.consumed.length} 条`, result);
+  }
+  if (name === 'xinchao_personality_reflect') {
+    if (!handlers.personalityReflect) throw new Error('性格内核私有存储未接入');
+    const result = await handlers.personalityReflect(personalityReflectArgs(args));
+    return toolText(
+      result.duplicate
+        ? `${result.month} 的性格内核已经评估过，本次未覆盖。`
+        : `${result.month} 的 14 维性格内核自评已写入私有状态。`,
+      { month: result.month, duplicate: result.duplicate },
     );
   }
   if (name === 'xinchao_cabin_inbox') {
@@ -496,6 +619,8 @@ export async function handleMcpMessage(payload, handlers) {
           '新窗口开始时调用 xinchao_context；服务端会绑定当前 MCP 连接，无需自行编写 session_id。',
           '一次实际互动后可调用 xinchao_event 更新窗口短状态；event_id 必须唯一，重试时复用。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
+          '独处时想留到下次窗口的事用 xinchao_pending_create；真正说出后用 xinchao_pending_consumed 回执。留下/ 放下只能由用户在 Dashboard 决定。',
+          '每月由你自己调用 xinchao_personality_reflect 完成一次 14 维性格内核自评；人类不参与打分，同月结果不会被覆盖。',
           '用户开锁后可用 xinchao_cabin_inbox 读取小屋来信；上锁的正文不会返回。你想给用户留话时可用 xinchao_cabin_note。',
           '只有结果明确的真实互动才填写 interaction_type；不要提交聊天正文或欲望数值。',
         ].join(''),
