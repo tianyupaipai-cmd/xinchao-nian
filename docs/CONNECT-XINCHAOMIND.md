@@ -6,6 +6,19 @@
 而自动出现在网页里。连接时需要的是这位用户自己部署实例的地址，以及该实例的
 `DASHBOARD_ACCESS_TOKEN`。
 
+### 三个地址不能混用
+
+```text
+人 ──打开──> https://xinchaomind.uk（公开网页）
+AI ──连接──> https://你的心潮域名/mcp（心潮 MCP）
+心潮 ──内部调用──> OMBRE_MCP_URL（OB 记忆后端）
+```
+
+- `xinchaomind.uk` 不是 MCP 服务，也不会替你部署心潮。
+- OB 地址不是“心潮公开网页地址”，也不是“心潮 MCP 连接器地址”。
+- 公开网页连接时填的是**你自己的心潮基础地址**，只填域名/端口，不追加 `/mcp`。
+- AI 的 MCP 连接器则必须在心潮基础地址后追加 `/mcp`。
+
 ## 1. 完成服务端配置
 
 在心潮·念根目录的 `.env` 中设置：
@@ -19,6 +32,11 @@ DASHBOARD_ENABLED=true
 DASHBOARD_ACCESS_TOKEN=请生成另一段至少32字符的随机值
 DASHBOARD_SESSION_TTL_SECONDS=43200
 DASHBOARD_INCLUDE_PRIVATE_TEXT=false
+
+# 只有心潮需要从 OB 读记忆/星图时才配置；这不是网页地址
+OMBRE_MCP_URL=http://ombre-brain:8000/mcp
+OMBRE_MCP_TOKEN=你的OB服务端令牌
+OMBRE_READ_ENABLED=true
 ```
 
 可用 `openssl rand -hex 32` 分别生成随机值。修改后必须重新构建或重启心潮：
@@ -80,6 +98,8 @@ DASHBOARD_PUBLIC_BASE_URL=https://xinchao.example.com
 | 浏览器提示 CORS / Origin | 本机直连白名单未生效 | 添加 `DASHBOARD_ALLOWED_ORIGINS=https://xinchaomind.uk` 后重启 |
 | HTTP 404 | 请求打到了错误服务或旧镜像 | 确认反代目标是心潮 18110，并重新构建最新版 |
 | HTTP 1101 | 托管 Worker/隧道异常 | 检查对应托管平台和隧道，不是 Dashboard 口令问题 |
+| 网页能连心潮，但星图显示未接入 OB | 心潮未开启 OB 读取 | 检查 `OMBRE_MCP_URL` / `OMBRE_MCP_TOKEN` / `OMBRE_READ_ENABLED=true` |
+| Claude 提示 Couldn't register | 把公开网页或 OB 地址当成了心潮 MCP | 使用自己的心潮 HTTPS 域名加 `/mcp` |
 
 ## 安全边界
 

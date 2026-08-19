@@ -16,6 +16,23 @@ function initialQueue() {
   return { schemaVersion: 1, deliveries: [] };
 }
 
+export function bridgeDeliveryFromDashboard(payload = {}, now = new Date()) {
+  const allowed = new Set(['event_id', 'eventId', 'message', 'deliver_after', 'deliverAfter', 'reason']);
+  const unexpected = Object.keys(payload).filter((key) => !allowed.has(key));
+  if (unexpected.length) throw new Error('bridge delivery only accepts event_id, message, reason and deliver_after');
+  const eventId = String(payload.event_id ?? payload.eventId ?? '').trim();
+  const message = String(payload.message ?? '').replace(/\s+/g, ' ').trim();
+  const deliverAfter = payload.deliver_after ?? payload.deliverAfter ?? null;
+  if (eventId.length < 8 || eventId.length > 120) throw new Error('event_id must contain 8 to 120 characters');
+  if (!message || message.length > 1200) throw new Error('message must contain 1 to 1200 characters');
+  const scheduled = deliverAfter && Date.parse(deliverAfter) > now.getTime();
+  const requested = String(payload.reason ?? '').trim();
+  const reason = requested && BRIDGE_REASONS.includes(requested) && requested !== 'scheduled_interaction'
+    ? requested
+    : (scheduled ? 'scheduled_interaction' : 'user_note');
+  return { eventId, message, deliverAfter, reason };
+}
+
 export class BridgeQueue {
   constructor(path, { maxEntries = 500, ttlHours = 168 } = {}) {
     this.store = new StateStore(path, initialQueue);
