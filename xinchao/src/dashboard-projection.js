@@ -109,6 +109,7 @@ function projectedPersonality(core = {}, config = {}) {
     constellation: compact(config.personality?.zodiac, 40) || null,
     month: compact(core?.month ?? history.at(-1)?.month, 7) || null,
     updatedAt: validDate(core?.updatedAt),
+    ...(includePrivateText && core?.periodSummary ? { periodSummary: compact(core.periodSummary, 1500) } : {}),
     dimensions: dimensions.map((dimension) => ({
       key: compact(dimension?.key, 80),
       label: compact(dimension?.label, 80),

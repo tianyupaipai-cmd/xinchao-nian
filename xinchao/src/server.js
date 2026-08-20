@@ -21,7 +21,7 @@ import { CabinStore } from './cabin-store.js';
 import { boardEnabled, postBoardMessage, readBoardMessages } from './board-client.js';
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
-import { PersonalityStore } from './personality-store.js';
+import { PersonalityStore, computePersonalityStats } from './personality-store.js';
 import { addPending, dropPending, holdPending, markConsumed, markDelivered, markHoldSyncResult, selectForHoldSync } from './pending-queue.js';
 
 const config = validateConfig(loadConfig());
@@ -1224,6 +1224,10 @@ const server = createServer(async (request, response) => {
         pendingCreate: async (input) => createPendingOutput(input, 'mcp'),
         pendingConsumed: async ({ ids }) => consumePendingOutputs(ids, 'mcp'),
         personalityReflect: async (input) => personality.recordAiAssessment(input),
+        personalityStats: async () => {
+          const core = await personality.getPersonalityCore();
+          return { stats: computePersonalityStats(core), core };
+        },
         cabinInbox: async () => cabin.unlockedUserNotes(),
         cabinNote: async (note) => cabin.addNote({ ...note, from: 'ai', locked: false }),
         // 公共留言板：只有配了令牌才把 board_post / board_read 工具暴露出来 / 接受调用。
