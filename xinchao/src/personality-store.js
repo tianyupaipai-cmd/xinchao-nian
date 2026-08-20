@@ -77,6 +77,7 @@ function normalizeSnapshot(input = {}) {
   return {
     month: String(input.month ?? '').trim().slice(0, 7) || null,
     recordedAt: String(input.recordedAt ?? input.updatedAt ?? '').trim() || null,
+    periodSummary: String(input.periodSummary ?? input.period_summary ?? '').trim().slice(0, 1500) || null,
     dimensions: normalizeDimensions(input.dimensions ?? input.core ?? input.scores),
   };
 }
@@ -92,9 +93,48 @@ export function normalizePersonalityCore(input = {}, source = 'private-state') {
     source,
     month: String(input.month ?? '').trim().slice(0, 7) || null,
     scoredBy: String(input.scoredBy ?? '').trim() || null,
+    periodSummary: String(input.periodSummary ?? input.period_summary ?? '').trim().slice(0, 1500) || null,
     updatedAt: String(input.updatedAt ?? '').trim() || null,
     dimensions,
     history,
+  };
+}
+
+/**
+ * 星核统计（拉取工具用的纯函数，多前端复用）。给一份 core，算出汇总：均值、最高/最低维、
+ * 最大上升/下降、净变化、已建档月数。不含私人正文（reason/periodSummary 由调用方决定是否附带）。
+ */
+export function computePersonalityStats(core = {}) {
+  const dims = (Array.isArray(core.dimensions) ? core.dimensions : []).map((d) => ({
+    key: String(d?.key ?? ''), label: String(d?.label ?? d?.key ?? ''),
+    score: Number(d?.score) || 0, delta: Number(d?.delta) || 0,
+  }));
+  const month = core.month ?? (Array.isArray(core.history) ? core.history.at(-1)?.month : null) ?? null;
+  if (!dims.length) {
+    return { available: false, month, source: core.source ?? null, dimensionCount: 0 };
+  }
+  const byScore = [...dims].sort((a, b) => b.score - a.score);
+  const byDelta = [...dims].sort((a, b) => b.delta - a.delta);
+  const total = dims.reduce((sum, d) => sum + d.score, 0);
+  const netDelta = dims.reduce((sum, d) => sum + d.delta, 0);
+  const topRiser = byDelta.find((d) => d.delta > 0) ?? null;
+  const topFaller = [...byDelta].reverse().find((d) => d.delta < 0) ?? null;
+  const pick = (d, withDelta) => (d ? { key: d.key, label: d.label, ...(withDelta ? { delta: d.delta } : { score: d.score }) } : null);
+  const monthsRecorded = (Array.isArray(core.history) ? core.history.length : 0) + (core.available ? 1 : 0);
+  return {
+    available: true,
+    month,
+    updatedAt: core.updatedAt ?? null,
+    source: core.source ?? null,
+    scoredBy: core.scoredBy ?? null,
+    dimensionCount: dims.length,
+    average: Number((total / dims.length).toFixed(2)),
+    highest: pick(byScore[0], false),
+    lowest: pick(byScore.at(-1), false),
+    biggestRiser: pick(topRiser, true),
+    biggestFaller: pick(topFaller, true),
+    netDelta: Number(netDelta.toFixed(2)),
+    monthsRecorded,
   };
 }
 
@@ -110,8 +150,11 @@ function validateAssessment(input = {}) {
     if (!key || values.has(key)) throw new Error('dimensions 含缺失或重复 key');
     values.set(key, raw);
   }
+  const periodSummary = String(input.periodSummary ?? input.period_summary ?? '')
+    .replace(/\s+/g, ' ').trim().slice(0, 1500);
   return {
     month,
+    periodSummary,
     dimensions: PERSONALITY_DIMENSIONS.map(({ key, label }) => {
       const raw = values.get(key);
       if (!raw) throw new Error(`dimensions 缺少 ${key}（${label}）`);
@@ -205,6 +248,7 @@ export class PersonalityStore {
       source: 'ai-self-assessment',
       scoredBy: 'ai',
       month: assessment.month,
+      periodSummary: assessment.periodSummary || null,
       updatedAt: recordedAt,
       dimensions,
       history,

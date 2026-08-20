@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 
 import { newState, settleState } from '../src/engine.js';
-import { NEUTRAL_DRIVE_BIAS, PERSONALITY_DIMENSIONS, PersonalityStore, driveBiasFromCore } from '../src/personality-store.js';
+import { NEUTRAL_DRIVE_BIAS, PERSONALITY_DIMENSIONS, PersonalityStore, computePersonalityStats, driveBiasFromCore } from '../src/personality-store.js';
 
 test('missing or damaged private personality mirror is neutral and non-fatal', async () => {
   const missing = new PersonalityStore('/definitely/missing/personality.json');
@@ -122,4 +122,41 @@ test('AI assessment rejects incomplete or unknown personality dimensions', async
     store.recordAiAssessment({ month: '2026-08', dimensions: invalid }),
     /缺少 joy/,
   );
+});
+
+test('personality stats summarize scores and the period summary round-trips through write and read', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'xinchao-personality-stats-'));
+  const path = join(directory, 'personality.json');
+  const store = new PersonalityStore(path);
+  const dimensions = PERSONALITY_DIMENSIONS.map((dim, index) => ({
+    key: dim.key,
+    score: 40 + index * 4, // 40..92 strictly increasing → first lowest, last highest
+    reason: `${dim.label} 的理由`,
+  }));
+
+  const result = await store.recordAiAssessment({
+    month: '2026-08',
+    period_summary: '这个月他终于敢先开口了',
+    dimensions,
+  });
+  assert.equal(result.duplicate, false);
+
+  const core = await store.getPersonalityCore();
+  assert.equal(core.periodSummary, '这个月他终于敢先开口了');
+  const persisted = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(persisted.periodSummary, '这个月他终于敢先开口了');
+
+  const stats = computePersonalityStats(core);
+  assert.equal(stats.available, true);
+  assert.equal(stats.dimensionCount, PERSONALITY_DIMENSIONS.length);
+  assert.equal(stats.highest.key, PERSONALITY_DIMENSIONS.at(-1).key);
+  assert.equal(stats.lowest.key, PERSONALITY_DIMENSIONS[0].key);
+  assert.equal(stats.average, 66);
+});
+
+test('personality stats are unavailable and non-fatal without a configured mirror', async () => {
+  const store = new PersonalityStore('/definitely/missing/personality.json');
+  const stats = computePersonalityStats(await store.getPersonalityCore());
+  assert.equal(stats.available, false);
+  assert.equal(stats.dimensionCount, 0);
 });
