@@ -247,6 +247,7 @@ export const XINCHAO_TOOLS = [
       '由 AI 自己完成一次月度 14 维性格内核评估，并写入部署侧私有 personality.json。人类不参与打分。',
       '必须一次提交完整 14 维，每维包含 0–100 分和简短理由；同一月份重复调用只返回原结果，不覆盖历史。',
       '这不是根据 12 维驱力自动反推性格：评分应来自 AI 对本月自身经历的审慎回顾。私人理由默认不会进入 Dashboard 快照。',
+      '建议先 breath 浮现本月高权重记忆作备料，再据此打分，并写一段 period_summary 记忆摘要解释这个月为什么这样。',
     ].join(''),
     inputSchema: {
       type: 'object',
@@ -267,11 +268,29 @@ export const XINCHAO_TOOLS = [
             additionalProperties: false,
           },
         },
+        period_summary: { type: 'string', maxLength: 1500, description: '本月关键经历的记忆摘要，用来解释这次为什么这样打分；由你回顾本月后自己写。可选。' },
       },
       required: ['month', 'dimensions'],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'xinchao_personality_stats',
+    title: '读取性格内核统计',
+    description: [
+      '拉取本月性格内核（星核）的 14 维分值、月度变化与汇总统计，供任意前端/客户端渲染或分析。只读，不打分。',
+      '返回最高/最低维度、最大上升/下降、均值、净变化、已建档月数，以及（若有）本周期记忆摘要 period_summary。',
+      '每维的私人理由 reason 默认不返回；确需时传 include_reasons=true。',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        include_reasons: { type: 'boolean', description: '是否一并返回每维的私人理由（默认否，属私密文本）。' },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'xinchao_cabin_inbox',
@@ -503,6 +522,7 @@ function pendingConsumedArgs(args = {}) {
 function personalityReflectArgs(args = {}) {
   return {
     month: String(args.month ?? '').trim(),
+    period_summary: String(args.period_summary ?? '').trim(),
     dimensions: Array.isArray(args.dimensions) ? args.dimensions : [],
   };
 }
@@ -552,6 +572,26 @@ async function callTool(name, args, handlers) {
         : `${result.month} 的 14 维性格内核自评已写入私有状态。`,
       { month: result.month, duplicate: result.duplicate },
     );
+  }
+  if (name === 'xinchao_personality_stats') {
+    if (!handlers.personalityStats) throw new Error('性格内核私有存储未接入');
+    const includeReasons = Boolean(args?.include_reasons);
+    const { stats, core } = await handlers.personalityStats();
+    if (!stats.available) {
+      return toolText('本月还没有性格内核自评（未接入 PERSONALITY_PATH 或未评估）。', { available: false, source: stats.source });
+    }
+    const dimensions = (core.dimensions ?? []).map((d) => ({
+      key: d.key, label: d.label, score: d.score, delta: d.delta,
+      ...(includeReasons ? { reason: d.reason } : {}),
+    }));
+    const line = [
+      `星核 ${stats.month ?? ''} · ${stats.dimensionCount}维 均值${stats.average}`,
+      stats.highest ? `最高 ${stats.highest.label}${stats.highest.score}` : '',
+      stats.lowest ? `最低 ${stats.lowest.label}${stats.lowest.score}` : '',
+      stats.biggestRiser ? `↑${stats.biggestRiser.label}+${stats.biggestRiser.delta}` : '',
+      stats.biggestFaller ? `↓${stats.biggestFaller.label}${stats.biggestFaller.delta}` : '',
+    ].filter(Boolean).join(' · ');
+    return toolText(line, { ...stats, periodSummary: core.periodSummary ?? null, dimensions });
   }
   if (name === 'xinchao_cabin_inbox') {
     const notes = await handlers.cabinInbox();
