@@ -73,6 +73,38 @@ function normalizeDimensions(input) {
   return [];
 }
 
+// 行为锚点：与 14 维分开的另一层——分值是程度，锚点是有无。很少变。
+// 红线：不由系统自动生成（只能 AI 自己定或用户确认）；不参与驱力偏置、
+// 不被任何驱力覆盖；OB 的 I 条目是素材，不自动升格为锚点。
+const MAX_ANCHORS = 7;
+
+function normalizeAnchor(value) {
+  const item = value && typeof value === 'object' ? value : {};
+  const label = String(item.label ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!label) return null;
+  const key = String(item.key ?? '').trim().slice(0, 60) || label;
+  return {
+    key,
+    label,
+    description: String(item.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 300),
+    addedAt: String(item.addedAt ?? '').trim() || null,
+  };
+}
+
+function normalizeAnchors(input) {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set();
+  const anchors = [];
+  for (const raw of input) {
+    const anchor = normalizeAnchor(raw);
+    if (!anchor || seen.has(anchor.key)) continue;
+    seen.add(anchor.key);
+    anchors.push(anchor);
+    if (anchors.length >= MAX_ANCHORS) break;
+  }
+  return anchors;
+}
+
 function normalizeSnapshot(input = {}) {
   return {
     month: String(input.month ?? '').trim().slice(0, 7) || null,
@@ -96,6 +128,7 @@ export function normalizePersonalityCore(input = {}, source = 'private-state') {
     periodSummary: String(input.periodSummary ?? input.period_summary ?? '').trim().slice(0, 1500) || null,
     updatedAt: String(input.updatedAt ?? '').trim() || null,
     dimensions,
+    anchors: normalizeAnchors(input.anchors),
     history,
   };
 }
@@ -251,17 +284,73 @@ export class PersonalityStore {
       periodSummary: assessment.periodSummary || null,
       updatedAt: recordedAt,
       dimensions,
+      // 锚点不随月度自评变动：月评只换 14 维分值，行为底线原样带过去。
+      anchors: normalizeAnchors(current.anchors),
       history,
     };
 
+    await this._persist(payload, 'ai-self-assessment', now);
+    return { duplicate: false, month: assessment.month, core: structuredClone(this.cache) };
+  }
+
+  async _persist(payload, source, now = new Date()) {
     await mkdir(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await chmod(temporary, 0o600);
     await rename(temporary, this.path);
-    this.cache = normalizePersonalityCore(payload, 'ai-self-assessment');
+    this.cache = normalizePersonalityCore(payload, source);
     this.cachedMtimeMs = (await stat(this.path)).mtimeMs;
     this.cachedMonth = monthKey(now);
-    return { duplicate: false, month: assessment.month, core: structuredClone(this.cache) };
+  }
+
+  /**
+   * 行为锚点增删。只能由 AI 自己认定或用户确认后调用——系统不自动生成锚点。
+   * add：同 key 存在时改为更新（label/description 覆盖，addedAt 保留原值）。
+   * remove：按 key 删除。锚点独立于 14 维与月评，改锚点不动其他任何字段。
+   */
+  async updateAnchors(input, now = new Date()) {
+    const operation = this.writeQueue.then(() => this.updateAnchorsUnlocked(input, now));
+    this.writeQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async updateAnchorsUnlocked(input, now = new Date()) {
+    if (!this.path) throw new Error('PERSONALITY_PATH 未配置');
+    const action = String(input?.action ?? '').trim();
+    if (action !== 'add' && action !== 'remove') throw new Error('action 必须是 add 或 remove');
+    const current = await this.getPersonalityCore(now);
+    const anchors = normalizeAnchors(current.anchors);
+
+    if (action === 'remove') {
+      const key = String(input?.key ?? '').trim();
+      if (!key) throw new Error('remove 需要 key');
+      const next = anchors.filter((anchor) => anchor.key !== key && anchor.label !== key);
+      if (next.length === anchors.length) return { changed: false, anchors };
+      await this._persistAnchors(current, next, now);
+      return { changed: true, anchors: next };
+    }
+
+    const candidate = normalizeAnchor({ ...input?.anchor, addedAt: new Date(now).toISOString() });
+    if (!candidate) throw new Error('add 需要 anchor.label');
+    const existing = anchors.find((anchor) => anchor.key === candidate.key);
+    if (existing) {
+      existing.label = candidate.label;
+      if (candidate.description) existing.description = candidate.description;
+      await this._persistAnchors(current, anchors, now);
+      return { changed: true, updated: true, anchors };
+    }
+    if (anchors.length >= MAX_ANCHORS) throw new Error(`锚点最多 ${MAX_ANCHORS} 条——底线贵在少而硬，先放下一条再加`);
+    const next = [...anchors, candidate];
+    await this._persistAnchors(current, next, now);
+    return { changed: true, anchors: next };
+  }
+
+  async _persistAnchors(current, anchors, now) {
+    // 以磁盘现状为底重写，只替换 anchors，避免覆盖并行月评刚写入的其他字段。
+    let base = {};
+    try { base = JSON.parse(await readFile(this.path, 'utf8')); } catch { base = {}; }
+    const payload = { schemaVersion: 1, ...base, anchors };
+    await this._persist(payload, current.source === 'not-configured' ? 'private-state' : current.source, now);
   }
 }

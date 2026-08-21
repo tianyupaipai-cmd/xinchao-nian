@@ -110,6 +110,13 @@ function projectedPersonality(core = {}, config = {}) {
     month: compact(core?.month ?? history.at(-1)?.month, 7) || null,
     updatedAt: validDate(core?.updatedAt),
     ...(includePrivateText && core?.periodSummary ? { periodSummary: compact(core.periodSummary, 1500) } : {}),
+    // 行为锚点：label 是身份宣言可默认展示；description 更私密，挂 includePrivateText 门。
+    anchors: (Array.isArray(core?.anchors) ? core.anchors : []).map((anchor) => ({
+      key: compact(anchor?.key, 60),
+      label: compact(anchor?.label, 40),
+      addedAt: validDate(anchor?.addedAt),
+      ...(includePrivateText ? { description: compact(anchor?.description, 300) } : {}),
+    })).filter((anchor) => anchor.label),
     dimensions: dimensions.map((dimension) => ({
       key: compact(dimension?.key, 80),
       label: compact(dimension?.label, 80),

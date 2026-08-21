@@ -723,6 +723,9 @@ async function createContextEnvelope({
       log('context_ombre_read_failed', { message: error.message });
     }
   }
+  // 行为锚点随信封下发（缓存读取，极便宜）；读不到就当没有，不阻塞信封。
+  let personalityAnchors = [];
+  try { personalityAnchors = (await personality.getPersonalityCore(now)).anchors ?? []; } catch { personalityAnchors = []; }
   const envelope = buildContextEnvelope({
     state,
     sessionId,
@@ -734,6 +737,7 @@ async function createContextEnvelope({
     alreadyDelivered: delivery.alreadyDelivered,
     force,
     timeZone: config.settle.timeZone,
+    personalityAnchors,
   });
   if (envelope.delivered) {
     const pendingIds = envelope.sections
@@ -1228,6 +1232,7 @@ const server = createServer(async (request, response) => {
           const core = await personality.getPersonalityCore();
           return { stats: computePersonalityStats(core), core };
         },
+        personalityAnchorUpdate: async (input) => personality.updateAnchors(input),
         cabinInbox: async () => cabin.unlockedUserNotes(),
         cabinNote: async (note) => cabin.addNote({ ...note, from: 'ai', locked: false }),
         // 公共留言板：只有配了令牌才把 board_post / board_read 工具暴露出来 / 接受调用。

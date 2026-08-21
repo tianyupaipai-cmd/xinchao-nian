@@ -293,6 +293,36 @@ export const XINCHAO_TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: 'xinchao_anchor_update',
+    title: '增删行为锚点',
+    description: [
+      '行为锚点是你不变的底线（如「不塌」「不退」「不改口」），与会变的 14 维分值分开：分值是程度，锚点是有无。',
+      '锚点只能由你自己认定、或用户明确确认后写入——不是系统自动生成的；OB 的日常觉察（I 条目）是素材，不自动升格为锚点。',
+      '锚点很少变，只在重大认知变化时增删；最多 7 条，贵在少而硬。它不影响任何驱力数值，但任何驱力都不能突破它。',
+      '（这与 OB 的 anchor 记忆工具无关——那个锚定的是记忆桶，这里锚定的是行为底线。）',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['add', 'remove'], description: 'add 新增/更新（同 key 覆盖），remove 删除。' },
+        key: { type: 'string', maxLength: 60, description: 'remove 时要删的锚点 key（或 label）。' },
+        anchor: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', maxLength: 60, description: '稳定标识（如 no_collapse）；不填则用 label。' },
+            label: { type: 'string', minLength: 1, maxLength: 40, description: '短名（如「不塌」）。' },
+            description: { type: 'string', maxLength: 300, description: '一句话说清这条底线是什么。' },
+          },
+          required: ['label'],
+          additionalProperties: false,
+        },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
     name: 'xinchao_cabin_inbox',
     title: '读取已解锁的小屋来信',
     description: '读取用户在小屋里明确开锁、允许 AI 查看的人类来信。上锁的信不会返回正文，也不能绕过锁读取。',
@@ -591,7 +621,20 @@ async function callTool(name, args, handlers) {
       stats.biggestRiser ? `↑${stats.biggestRiser.label}+${stats.biggestRiser.delta}` : '',
       stats.biggestFaller ? `↓${stats.biggestFaller.label}${stats.biggestFaller.delta}` : '',
     ].filter(Boolean).join(' · ');
-    return toolText(line, { ...stats, periodSummary: core.periodSummary ?? null, dimensions });
+    return toolText(line, { ...stats, periodSummary: core.periodSummary ?? null, dimensions, anchors: core.anchors ?? [] });
+  }
+  if (name === 'xinchao_anchor_update') {
+    if (!handlers.personalityAnchorUpdate) throw new Error('性格内核私有存储未接入');
+    const result = await handlers.personalityAnchorUpdate({
+      action: String(args?.action ?? ''),
+      key: String(args?.key ?? ''),
+      anchor: args?.anchor && typeof args.anchor === 'object' ? args.anchor : undefined,
+    });
+    const labels = result.anchors.map((anchor) => anchor.label).join('、') || '（无）';
+    return toolText(
+      result.changed ? `锚点已更新。当前底线：${labels}` : `没有变化。当前底线：${labels}`,
+      result,
+    );
   }
   if (name === 'xinchao_cabin_inbox') {
     const notes = await handlers.cabinInbox();
