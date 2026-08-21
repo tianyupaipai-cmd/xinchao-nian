@@ -142,8 +142,15 @@ export class OmbreClient {
   // 会保留 driveSnapshot / driveAffinity 等 3.0 可选字段。
   async memoryMap() {
     if (!this.config.readEnabled) return emptyMemoryMap('not_configured');
+    // 缓存 10 分钟：构建一次（OB pulse + 建边）后重用，避免每次请求都重跑最重的一条。
+    const now = Date.now();
+    if (this._memoryMapCache && (now - this._memoryMapCache.at) < 600_000) {
+      return this._memoryMapCache.value;
+    }
     const result = await this.call('pulse', {});
-    return parseMemoryMapText(extractText(result));
+    const map = parseMemoryMapText(extractText(result));
+    if (map.available) this._memoryMapCache = { at: now, value: map };
+    return map;
   }
 
   async memoryBucketPreview(bucketId, maxLines = 7) {
@@ -412,6 +419,18 @@ function normalizeStar(star = {}) {
   };
 }
 
+// 星图是可视化不是全量导出：桶越多，建边(O(pairs))和 payload 越炸。只保留最重的一批
+// ——固化(pinned)优先，其余按权重降序——把负载和总桶数脱钩。total 仍报真实数，网页显示不变。
+const MAX_MAP_STARS = 400;
+function capMapStars(stars, max = MAX_MAP_STARS) {
+  if (!Array.isArray(stars) || stars.length <= max) return stars;
+  return stars
+    .map((star, index) => ({ star, index, rank: (star.pinned ? 1e9 : 0) + (Number(star.weight) || 0) }))
+    .sort((a, b) => (b.rank - a.rank) || (a.index - b.index))
+    .slice(0, max)
+    .map((item) => item.star);
+}
+
 function buildMapEdges(stars, minShared = 3, maxPerNode = 6) {
   const byTag = new Map();
   stars.forEach((star, index) => star.tags.forEach((tag) => {
@@ -478,7 +497,8 @@ export function parseMemoryMapText(raw) {
     const parsed = JSON.parse(text);
     const sourceStars = parsed.stars ?? parsed.nodes;
     if (Array.isArray(sourceStars)) {
-      const stars = sourceStars.map(normalizeStar).filter(Boolean);
+      const allStars = sourceStars.map(normalizeStar).filter(Boolean);
+      const stars = capMapStars(allStars);
       const explicitEdges = normalizeEdges(parsed.edges ?? parsed.links, stars);
       const capabilities = {
         explicitRelations: explicitEdges.length > 0,
@@ -490,7 +510,7 @@ export function parseMemoryMapText(raw) {
         schemaVersion: Number(parsed.schemaVersion ?? 2),
         generatedAt: String(parsed.generatedAt ?? new Date().toISOString()),
         available: true,
-        total: stars.length,
+        total: allStars.length,
         stats: parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : {},
         stars,
         edges: explicitEdges.length ? explicitEdges : buildMapEdges(stars),
@@ -533,15 +553,16 @@ export function parseMemoryMapText(raw) {
       historical: true,
     }));
   }
-  const filteredStars = stars.filter(Boolean);
+  const allStars = stars.filter(Boolean);
+  const cappedStars = capMapStars(allStars);
   return {
     schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     available: true,
-    total: filteredStars.length,
+    total: allStars.length,
     stats,
-    stars: filteredStars,
-    edges: buildMapEdges(filteredStars),
+    stars: cappedStars,
+    edges: buildMapEdges(cappedStars),
     capabilities: {
       explicitRelations: false,
       driveSnapshots: false,
