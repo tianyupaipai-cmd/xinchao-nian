@@ -135,6 +135,58 @@ def register(mcp) -> None:
             "truncated": len(all_lines) > len(lines),
         })
 
+    @mcp.custom_route("/api/bucket-map", methods=["GET"])
+    async def api_bucket_map(request: Request) -> Response:
+        """Trusted-sidecar-only structured star map for the owner's memory map.
+
+        Same Bearer-token boundary as /api/bucket-preview above: this is for the
+        dynamic-mind sidecar, not browsers.  Metadata only — no content preview,
+        no why_remembered — so the payload stays light and privacy-clean.
+        (pulse returns a human-readable digest, not a per-bucket table; the
+        sidecar needs structured rows to draw the constellation.)
+        """
+        from starlette.responses import JSONResponse
+        configured = os.environ.get("OMBRE_MCP_SERVICE_TOKEN", "").strip()
+        auth = request.headers.get("Authorization", "")
+        supplied = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        if len(configured) < 32 or len(supplied) != len(configured) or not hmac.compare_digest(supplied, configured):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        try:
+            all_buckets = await sh.bucket_mgr.list_all(include_archive=True)
+            stars = []
+            stats = {"pinned": 0, "dynamic": 0, "archived": 0}
+            for b in all_buckets:
+                meta = b.get("metadata", {})
+                if meta.get("deleted_at"):
+                    continue
+                btype = meta.get("type", "dynamic")
+                if meta.get("pinned") or btype == "permanent":
+                    stats["pinned"] += 1
+                elif btype == "archive":
+                    stats["archived"] += 1
+                else:
+                    stats["dynamic"] += 1
+                stars.append({
+                    "id": b["id"],
+                    "name": meta.get("name", b["id"]),
+                    "type": btype,
+                    "domain": meta.get("domain", []),
+                    "tags": meta.get("tags", []),
+                    "valence": meta.get("valence", 0.5),
+                    "arousal": meta.get("arousal", 0.3),
+                    "importance": meta.get("importance", 5),
+                    "resolved": meta.get("resolved", False),
+                    "pinned": meta.get("pinned", False),
+                    "created_at": meta.get("created", ""),
+                    "last_active": meta.get("last_active", ""),
+                    "activation_count": meta.get("activation_count", 0),
+                    "score": sh.decay_engine.calculate_score(meta),
+                })
+            stars.sort(key=lambda x: x["score"], reverse=True)
+            return JSONResponse({"stats": stats, "total": len(stars), "stars": stars[:800]})
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     @mcp.custom_route("/api/buckets", methods=["GET"])
     async def api_buckets(request: Request) -> Response:
         """List all buckets with metadata (no content for efficiency)."""
