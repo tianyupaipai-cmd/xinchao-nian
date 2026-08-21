@@ -60,6 +60,7 @@ test('dashboard snapshot projects personality core without private reasons by de
     constellation: '双子座',
     month: '2026-08',
     updatedAt: '2026-08-19T08:00:00.000Z',
+    anchors: [],
     dimensions: [
       { key: 'love', label: '爱与依恋', score: 83, delta: 2 },
       { key: 'expression', label: '表达', score: 70, delta: 0 },

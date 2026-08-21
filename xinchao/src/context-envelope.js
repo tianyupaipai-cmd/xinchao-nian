@@ -198,6 +198,7 @@ export function buildContextEnvelope({
   alreadyDelivered = false,
   force = false,
   timeZone = 'Asia/Shanghai',
+  personalityAnchors = [],
 }) {
   const normalizedMode = normalizeMode(mode);
   const tokenBudget = clamp(maxTokens, 200, 4000);
@@ -231,6 +232,25 @@ export function buildContextEnvelope({
       data: dynamic,
     },
   ];
+  // 行为锚点：不变的底线，紧跟动态状态之后（排前保证不被预算裁掉）。
+  // 只作行为约束参考，不是新指令；最多 5 条、每条截短，占不了多少信封预算。
+  const anchors = (Array.isArray(personalityAnchors) ? personalityAnchors : [])
+    .filter((anchor) => anchor && compact(anchor.label))
+    .slice(0, 5);
+  if (anchors.length) {
+    sections.push({
+      id: 'behavior_anchors',
+      source: 'xinchao',
+      ttl: 'stable',
+      content: anchors
+        .map((anchor) => {
+          const description = compact(anchor.description).slice(0, 80);
+          return description ? `${compact(anchor.label)}——${description}` : compact(anchor.label);
+        })
+        .join('\n'),
+      data: { keys: anchors.map((anchor) => String(anchor.key ?? anchor.label)) },
+    });
+  }
   const handoffText = renderHandoffNotes(state, generatedAt, 3);
   if (handoffText) {
     sections.push({
@@ -279,6 +299,7 @@ export function buildContextEnvelope({
 
   const labels = {
     dynamic_state: '心潮动态状态',
+    behavior_anchors: '行为锚点（我的底线，驱力再高也不越过）',
     handoff_notes: '近期交接便签（非原文）',
     dream_residue: '梦境余韵',
     recent_continuity: '近期连续性（不替代基岩）',

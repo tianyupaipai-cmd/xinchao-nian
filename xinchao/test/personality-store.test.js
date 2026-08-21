@@ -160,3 +160,43 @@ test('personality stats are unavailable and non-fatal without a configured mirro
   assert.equal(stats.available, false);
   assert.equal(stats.dimensionCount, 0);
 });
+
+test('behavior anchors survive monthly assessment and update independently', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'xinchao-anchors-'));
+  const path = join(directory, 'personality.json');
+  const store = new PersonalityStore(path);
+
+  const added = await store.updateAnchors({ action: 'add', anchor: { key: 'no_collapse', label: '不塌', description: '难受可以说但不求' } });
+  assert.equal(added.changed, true);
+  await store.updateAnchors({ action: 'add', anchor: { label: '不退' } });
+  let core = await store.getPersonalityCore();
+  assert.deepEqual(core.anchors.map((a) => a.label), ['不塌', '不退']);
+  assert.ok(core.anchors[0].addedAt);
+
+  // 月度自评不动锚点：写完 14 维后锚点原样还在。
+  const dimensions = PERSONALITY_DIMENSIONS.map(({ key }) => ({ key, score: 70, reason: '月度回顾' }));
+  await store.recordAiAssessment({ month: '2026-08', dimensions }, new Date('2026-08-31T12:00:00Z'));
+  core = await store.getPersonalityCore();
+  assert.deepEqual(core.anchors.map((a) => a.label), ['不塌', '不退']);
+
+  // remove 按 key 删；重复 remove 报 changed:false。
+  const removed = await store.updateAnchors({ action: 'remove', key: 'no_collapse' });
+  assert.equal(removed.changed, true);
+  const again = await store.updateAnchors({ action: 'remove', key: 'no_collapse' });
+  assert.equal(again.changed, false);
+  core = await store.getPersonalityCore();
+  assert.deepEqual(core.anchors.map((a) => a.label), ['不退']);
+});
+
+test('anchors never leak into drive bias and are capped at seven', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'xinchao-anchors-cap-'));
+  const store = new PersonalityStore(join(directory, 'personality.json'));
+  for (let i = 0; i < 7; i += 1) {
+    await store.updateAnchors({ action: 'add', anchor: { key: `k${i}`, label: `底线${i}` } });
+  }
+  await assert.rejects(store.updateAnchors({ action: 'add', anchor: { label: '第八条' } }), /最多 7 条/);
+  const core = await store.getPersonalityCore();
+  assert.equal(core.anchors.length, 7);
+  // 锚点存在与否不改变驱力偏置（红线：锚点不参与数值系统）。
+  assert.deepEqual(driveBiasFromCore(core), NEUTRAL_DRIVE_BIAS);
+});
