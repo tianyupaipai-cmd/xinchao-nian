@@ -12,7 +12,12 @@
 
 services:
   ombre-brain:
-    build: ./ombre-brain
+    build:
+      context: ./ombre-brain
+      args:
+        # 国内 VPS 直连官方 PyPI 常卡死；在 .env 里填 PIP_INDEX_URL 即可走镜像（Dockerfile 已支持）
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     image: xinchao-nian/ombre-brain:local
     container_name: ombre-brain
     restart: unless-stopped

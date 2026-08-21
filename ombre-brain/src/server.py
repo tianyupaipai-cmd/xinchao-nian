@@ -38,6 +38,7 @@ import httpx
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from bucket_manager import BucketManager
 from dehydrator import Dehydrator
@@ -525,7 +526,19 @@ _tools_runtime.init(
 # MCP 工具 —— 仅注册，实现见 tools/<tool>/
 # 每个入口都不超过 10 行，便于一眼看清参数与归属
 # =============================================================
-@mcp.tool()
+def _ann(*, read_only: bool = False, destructive: bool = False, idempotent: bool = False) -> ToolAnnotations:
+    """MCP 工具注解。claude.ai 等客户端只对 readOnlyHint=True 的工具开放「总是允许」，
+    其余一律逐次批准；所以只给真正不改记忆正文/元数据的工具标 readOnly
+    （breath 命中后只更新激活计数，不改正文与元数据，按只读对待）。"""
+    return ToolAnnotations(
+        readOnlyHint=read_only,
+        destructiveHint=destructive,
+        idempotentHint=idempotent,
+        openWorldHint=False,
+    )
+
+
+@mcp.tool(annotations=_ann(read_only=True, idempotent=True))
 async def breath(
     query: Optional[str] = "",
     max_tokens: Optional[int] = 0,
@@ -553,7 +566,7 @@ async def breath(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ann())
 async def hold(
     content: str,
     tags: Optional[str] = "",
@@ -589,7 +602,7 @@ async def hold(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ann())
 async def grow(
     content: str = "",
     items: Optional[list] = None,
@@ -611,7 +624,7 @@ async def grow(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ann(idempotent=True))
 async def forget(id: str, reason: str) -> str:
     """按 ID 软删除一条错误记忆。只写 deleted 标记、时间与原因，正文留在本地归档；删除后不再参与 breath、dream、trace 或 feel。工具不读取、返回或记录记忆正文。"""
     return await _with_notice(
@@ -621,7 +634,7 @@ async def forget(id: str, reason: str) -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ann(idempotent=True))
 async def restore(id: str) -> str:
     """按 ID 恢复一条由 forget 软删除的记忆。工具不返回记忆正文。"""
     return await _with_notice(
@@ -631,7 +644,7 @@ async def restore(id: str) -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ann(destructive=True, idempotent=True))
 async def purge(id: str, reason: str, confirm_id: str) -> str:
     """永久删除一条已先经过 forget 的记忆及其托管索引、向量和缓存。confirm_id 必须与 id 完全一致；不可恢复。审计仅保留 ID、时间和原因，不保留正文。"""
     return await _with_notice(
@@ -645,7 +658,7 @@ async def purge(id: str, reason: str, confirm_id: str) -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ann(idempotent=True))
 async def trace(
     bucket_id: str,
     name: Optional[str] = "",
@@ -695,7 +708,7 @@ async def trace(
     )
 
 
-@mcp_extra.tool()
+@mcp_extra.tool(annotations=_ann(idempotent=True))
 async def anchor(bucket_id: str) -> str:
     """把指定桶标记为 anchor(坐标系)。anchor 不主动出现在默认 breath，但 query/domain/emotion 命中时仍返回。硬上限 24，已满时拒绝并提示先 release。"""
     return await _with_notice(
@@ -705,7 +718,7 @@ async def anchor(bucket_id: str) -> str:
     )
 
 
-@mcp_extra.tool()
+@mcp_extra.tool(annotations=_ann(idempotent=True))
 async def release(bucket_id: str) -> str:
     """解除指定桶的 anchor 标记。桶恢复为普通状态，重新参与默认 breath；pinned 状态保留。"""
     return await _with_notice(
@@ -715,7 +728,7 @@ async def release(bucket_id: str) -> str:
     )
 
 
-@mcp_extra.tool()
+@mcp_extra.tool(annotations=_ann(read_only=True, idempotent=True))
 async def pulse(include_archive: Optional[bool] = False) -> str:
     """返回记忆系统状态摘要:固化/动态/归档/feel/plan/letter 数量、总占用、衰减引擎运行状态,以及所有桶的摘要列表。include_archive=True 同时返回归档区。"""
     return await _with_notice(
@@ -794,7 +807,7 @@ async def letter_read(
     )
 
 
-@mcp_extra.tool()
+@mcp_extra.tool(annotations=_ann())
 async def I(
     content: Optional[str] = "",
     aspect: Optional[str] = "",
@@ -809,7 +822,7 @@ async def I(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ann())
 async def dream(window_hours: Optional[int] = 48) -> str:
     """读取最近 window_hours（默认 48h）内有变动的所有记忆桶,用于回顾与消化。
     每个桶返回其在窗口内的最新内容（按 last_active 取）,完整正文不截断。
