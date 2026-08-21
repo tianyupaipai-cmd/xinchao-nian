@@ -7,7 +7,7 @@ export class OmbreClient {
     this.initializePromise = null;
   }
 
-  async post(payload, expectBody = true) {
+  async post(payload, expectBody = true, timeoutMs = 15000) {
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
@@ -18,7 +18,7 @@ export class OmbreClient {
     const response = await fetch(this.config.url, {
       method: 'POST', headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) throw new Error(`Ombre MCP failed: HTTP ${response.status}`);
     this.sessionId = response.headers.get('mcp-session-id') ?? this.sessionId;
@@ -48,11 +48,11 @@ export class OmbreClient {
     return this.initializePromise;
   }
 
-  async call(name, args = {}) {
+  async call(name, args = {}, timeoutMs = 15000) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await this.initialize();
       try {
-        return await this.post({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name, arguments: args } });
+        return await this.post({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name, arguments: args } }, true, timeoutMs);
       } catch (error) {
         if (attempt || !/HTTP (400|404)/.test(error.message)) throw error;
         this.sessionId = null;
@@ -142,15 +142,31 @@ export class OmbreClient {
   // 会保留 driveSnapshot / driveAffinity 等 3.0 可选字段。
   async memoryMap() {
     if (!this.config.readEnabled) return emptyMemoryMap('not_configured');
-    // 缓存 10 分钟：构建一次（OB pulse + 建边）后重用，避免每次请求都重跑最重的一条。
-    const now = Date.now();
-    if (this._memoryMapCache && (now - this._memoryMapCache.at) < 600_000) {
+    // 绝不在请求里同步等 OB pulse（679+ 桶要几十秒，必然超时 502）：
+    // 有缓存就秒回（过期了顺手后台刷新）；没缓存就后台开建、本次立刻回“构建中”。
+    if (this._memoryMapCache) {
+      if (Date.now() - this._memoryMapCache.at >= 600_000) this._triggerMemoryMapBuild();
       return this._memoryMapCache.value;
     }
-    const result = await this.call('pulse', {});
-    const map = parseMemoryMapText(extractText(result));
-    if (map.available) this._memoryMapCache = { at: now, value: map };
-    return map;
+    this._triggerMemoryMapBuild();
+    return buildingMemoryMap();
+  }
+
+  _triggerMemoryMapBuild() {
+    if (this._memoryMapBuilding) return; // 同时只跑一个构建，避免并发抢 OB
+    this._memoryMapBuilding = true;
+    (async () => {
+      try {
+        // 后台构建：给 OB pulse 充足时间（60s），不受请求 30s 超时约束。
+        const result = await this.call('pulse', {}, 60000);
+        const map = parseMemoryMapText(extractText(result));
+        if (map.available) this._memoryMapCache = { at: Date.now(), value: map };
+      } catch {
+        // 构建失败不缓存，下次请求会再次触发重试。
+      } finally {
+        this._memoryMapBuilding = false;
+      }
+    })();
   }
 
   async memoryBucketPreview(bucketId, maxLines = 7) {
@@ -339,6 +355,26 @@ function emptyMemoryMap(reason = 'empty') {
     generatedAt: new Date().toISOString(),
     available: false,
     reason,
+    total: 0,
+    stats: {},
+    stars: [],
+    edges: [],
+    capabilities: {
+      explicitRelations: false,
+      driveSnapshots: false,
+      driveAffinity: false,
+      timestamps: false,
+    },
+  };
+}
+
+// 首次还没缓存、正在后台构建时的即时占位：available:false + reason:'building'，网页据此提示并稍后自动重试。
+function buildingMemoryMap() {
+  return {
+    schemaVersion: 2,
+    generatedAt: new Date().toISOString(),
+    available: false,
+    reason: 'building',
     total: 0,
     stats: {},
     stars: [],
