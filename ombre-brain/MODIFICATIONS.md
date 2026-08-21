@@ -25,6 +25,15 @@ P0luz/Ombre-Brain（原项目, MIT, © P0lar1zzZ）
    - 压缩模型从 GLM-Z1 换成 DeepSeek-V3（11.5s → ~1.0s）。通过 config / 环境变量配置，
      不改源码。
 
+3. **bucket-map（记忆星图数据源）**
+   - `src/web/buckets.py`：新增 `GET /api/bucket-map`——sidecar 专用（与
+     `/api/bucket-preview` 同一 `OMBRE_MCP_SERVICE_TOKEN` Bearer 边界，不收浏览器
+     cookie）的结构化星表：仅逐桶元数据（id/name/type/domain/tags/情感/重要度/
+     score 等），**不含正文、不含 content_preview / why_remembered**，按 score
+     降序、封顶 800 条。
+   - 目的：pulse 是人类可读摘要，桶多时不含逐桶行，上层"心潮"解析不出星图；
+     星图需要结构化行。additive，不改任何既有路由与工具。
+
 > OB 原生功能全部保留：breath / hold / grow / dream / trace / anchor / release / forget /
 > restore / purge / I / plan / letter / pulse 与 Dashboard。心潮念只做上述增量，不裁剪。
 

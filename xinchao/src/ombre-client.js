@@ -157,16 +157,43 @@ export class OmbreClient {
     this._memoryMapBuilding = true;
     (async () => {
       try {
-        // 后台构建：给 OB pulse 充足时间（60s），不受请求 30s 超时约束。
-        const result = await this.call('pulse', {}, 60000);
-        const map = parseMemoryMapText(extractText(result));
-        if (map.available) this._memoryMapCache = { at: Date.now(), value: map };
-      } catch {
-        // 构建失败不缓存，下次请求会再次触发重试。
+        // 优先走 OB 的结构化星表路由（/api/bucket-map，sidecar token）；
+        // 老版 OB 没有这条路由时退回 pulse 文本解析（pulse 是人类摘要，
+        // 桶多时不含逐桶行，解析出 0 颗星——所以结构化路由才是正路）。
+        let map = await this.fetchBucketMapStructured();
+        if (!map) {
+          const result = await this.call('pulse', {}, 60000);
+          map = parseMemoryMapText(extractText(result));
+        }
+        if (map.available && map.stars.length) {
+          this._memoryMapCache = { at: Date.now(), value: map };
+        } else {
+          console.error('[ombre] memory map build yielded no stars', { reason: map.reason ?? null, total: map.total });
+        }
+      } catch (error) {
+        // 失败不缓存，下次请求会再次触发重试；必须留痕，不许静默。
+        console.error('[ombre] memory map build failed:', error.message);
       } finally {
         this._memoryMapBuilding = false;
       }
     })();
+  }
+
+  // OB 结构化星表（元数据，无正文）。404 = 老版 OB 没有该路由，返回 null 让调用方退回 pulse。
+  async fetchBucketMapStructured() {
+    const url = new URL(this.config.url);
+    url.pathname = '/api/bucket-map';
+    url.search = '';
+    const headers = { Accept: 'application/json', 'X-Ombre-Caller': 'dynamic-mind' };
+    if (this.config.token) headers.Authorization = `Bearer ${this.config.token}`;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Ombre bucket-map failed: HTTP ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data?.stars)) return null;
+    const map = parseMemoryMapText(JSON.stringify({ stars: data.stars, stats: data.stats ?? {} }));
+    if (Number.isFinite(Number(data.total))) map.total = Number(data.total);
+    return map;
   }
 
   async memoryBucketPreview(bucketId, maxLines = 7) {
