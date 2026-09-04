@@ -23,7 +23,7 @@ const INTERACTION_TYPES = new Set([
 export const OB_PROXY_TOOLS = ['breath', 'hold', 'grow', 'trace', 'forget', 'dream', 'anchor', 'release', 'I', 'pulse'];
 const OB_PROXY_SET = new Set(OB_PROXY_TOOLS);
 
-// 对外用中文标题 + 中文说明（内部名保持不变，用于协议路由）。让顾川看到的是"浮现记忆"而不是"breath"。
+// 对外用中文标题 + 中文说明（内部名保持不变，用于协议路由）。让机看到的是"浮现记忆"而不是"breath"。
 const OB_TOOL_LABELS = {
   breath:  { title: '浮现记忆', description: '让当前最相关的长期记忆自然浮现，并带回近期梦境摘要与余韵。用于新窗口开始、上下文断层、或确需重新寻找相关记忆时；不要每条消息调用。' },
   hold:    { title: '沉淀一条', description: '当场存一条重要的短记忆（重要决定、关系变化、有长期意义的话或共同经历）。必须写 meaning 补上下文；不适合普通寒暄、临时信息或每一句对话。' },

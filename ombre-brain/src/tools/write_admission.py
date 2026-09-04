@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import os
 import re
 from typing import Optional
 
@@ -33,7 +34,8 @@ _TECH_PATTERNS = (
 _PERSONAL_PATTERNS = (
     re.compile(r"(?:喜欢|讨厌|害怕|难过|开心|委屈|心疼|想念|信任|在意|感动|爱|关系)"),
     re.compile(r"(?:承诺|约定|边界|习惯|偏好|陪伴|照顾|抱住|记着|别忘|不要忘)"),
-    re.compile(r"(?:顾川|小雨|派派|朱天雨)"),
+    # 私人称呼名单从环境变量 OB_PRIVATE_NAMES 读（用 | 分隔），默认不匹配任何名字
+    *([re.compile("(?:" + os.environ["OB_PRIVATE_NAMES"] + ")")] if os.environ.get("OB_PRIVATE_NAMES") else []),
 )
 
 _FIRST_PASS_PATTERNS = (
