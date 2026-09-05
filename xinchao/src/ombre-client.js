@@ -28,7 +28,7 @@ export class OmbreClient {
   }
 
   async initialize() {
-    if (this.sessionId) return;
+    if (this.sessionId || this.stateless) return;
     if (!this.initializePromise) {
       this.initializePromise = (async () => {
         await this.post({
@@ -41,7 +41,8 @@ export class OmbreClient {
             clientInfo: { name: 'xinchao-dynamic-mind', version: SYSTEM_VERSION },
           },
         });
-        if (!this.sessionId) throw new Error('Ombre MCP did not return a session id');
+        // OB 2.8.5+ 的 Streamable HTTP 是无状态 JSON 响应，不发 Mcp-Session-Id；没有就按无状态走，不当错误。
+        this.stateless = !this.sessionId;
         await this.post({ jsonrpc: '2.0', method: 'notifications/initialized' }, false);
       })().finally(() => { this.initializePromise = null; });
     }
@@ -54,8 +55,9 @@ export class OmbreClient {
       try {
         return await this.post({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name, arguments: args } }, true, timeoutMs);
       } catch (error) {
-        if (attempt || !/HTTP (400|404)/.test(error.message)) throw error;
+        if (attempt || !/HTTP (400|401|404)/.test(error.message)) throw error;
         this.sessionId = null;
+        this.stateless = false;
       }
     }
     throw new Error('Ombre MCP call failed after session refresh');
@@ -72,6 +74,7 @@ export class OmbreClient {
         return raw?.result?.tools ?? raw?.tools ?? [];
       } catch (error) {
         this.sessionId = null;
+        this.stateless = false;
         if (attempt) throw error;
       }
     }
