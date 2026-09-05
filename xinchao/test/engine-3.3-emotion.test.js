@@ -89,9 +89,9 @@ test('grief and anger drives lower the resting valence without any growth term',
   state.drives.grieve = 0.8;
   const a = settleState(state, new Date('2026-09-05T20:00:00.000Z')).state;
   const b = settleState(a, new Date('2026-09-06T08:00:00.000Z')).state;
-  const c = settleState(b, new Date('2026-09-06T20:00:00.000Z')).state;
-  assert.ok(c.emotion.valence <= b.emotion.valence + 0.0001);
-  assert.ok(c.emotion.valence < EMOTION_BASELINE.valence);
+  // grieve 现在会按 24h 半衰期回落，所以目标随之回升；只断言：难过着的时候愉悦确实被拽低
+  assert.ok(a.emotion.valence < EMOTION_BASELINE.valence);
+  assert.ok(b.emotion.valence < EMOTION_BASELINE.valence);
 });
 
 test('labels cover the quadrants', () => {
