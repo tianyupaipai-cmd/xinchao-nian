@@ -241,6 +241,15 @@ export class OmbreClient {
     return bucketId;
   }
 
+  // 自我觉察确认后写进 OB 的 I（候选桶，之后由 dream 见证升正式条目）。只在写开关打开时可用。
+  async writeSelfAwareness(content, aspect = 'patterns') {
+    if (!this.config.writeEnabled) throw new Error('ombre_write_disabled');
+    const text = String(content ?? '').trim();
+    if (!text) throw new Error('awareness_content_empty');
+    const result = await this.call('I', { content: text, aspect: String(aspect || 'patterns') });
+    return extractText(result).slice(0, 600);
+  }
+
   // 只用 OB 已有 trace 记一条来源关系；不改正文、不强制 anchor、不新增 OB 写能力。
   async traceHeldOutputSources(outputBucketId, sourceBucketIds = []) {
     if (!this.config.writeEnabled) throw new Error('ombre_write_disabled');

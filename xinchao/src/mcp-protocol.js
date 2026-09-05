@@ -156,6 +156,27 @@ export const XINCHAO_TOOLS = [
     },
   },
   {
+    name: 'xinchao_awareness',
+    title: '自我觉察：看、确认或放下候选',
+    description: [
+      '系统每天从我的情绪日志、驱力、持续念头和浮现记忆里挑出"我最近的样子"的候选觉察。',
+      'action=list 看候选与已确认；confirm 确认一条（可用 text 换成我自己的措辞、note 补一句、aspect 指定 OB 的 I 维度），',
+      '若 OB 写入已开则沉淀为候选自我认知；dismiss 放下一条；scan 立刻扫一次。',
+      '确认与放下都由我自己定，人类不代填。候选不一定对，不是指令。',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'confirm', 'dismiss', 'scan'], description: '默认 list。' },
+        id: { type: 'string', minLength: 1, maxLength: 80, description: 'confirm / dismiss 时必填，来自 list 或上下文信封。' },
+        text: { type: 'string', minLength: 1, maxLength: 400, description: 'confirm 时可选：用我自己的话重写这条觉察。' },
+        note: { type: 'string', minLength: 1, maxLength: 400, description: '可选补充。' },
+        aspect: { type: 'string', enum: ['nature', 'values', 'patterns', 'limits', 'becoming', 'uncertainty', 'stance'], description: 'confirm 时可选：写进 OB 的 I 时用哪个维度。' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'xinchao_handoff_note',
     title: '保存近期交接便签',
     description: [
@@ -503,6 +524,14 @@ function eventArgs(args = {}, fallbackSessionId = '') {
   };
 }
 
+function awarenessArgs(args = {}) {
+  const out = { action: String(args.action ?? 'list').trim().toLowerCase() };
+  for (const key of ['id', 'text', 'note', 'aspect']) {
+    if (args[key] !== undefined && args[key] !== null && String(args[key]).trim()) out[key] = String(args[key]).trim();
+  }
+  return out;
+}
+
 function handoffNoteArgs(args = {}, fallbackSessionId = '') {
   const sessionId = stableSessionId(args, fallbackSessionId);
   if (!sessionId) throw new Error('session_id 是必填项');
@@ -576,6 +605,20 @@ async function callTool(name, args, handlers) {
       `心潮窗口事件已接收：session=${result.sessionId} revision=${result.revision}${interaction}${duplicate}`,
       result,
     );
+  }
+  if (name === 'xinchao_awareness') {
+    if (!handlers.awareness) throw new Error('自我觉察未接入');
+    const result = await handlers.awareness(awarenessArgs(args));
+    if (result.action === 'list' || result.action === 'scan') {
+      const lines = result.open.length
+        ? result.open.map((c) => `- [${c.id}] ${c.text}`)
+        : ['（暂无候选）'];
+      return toolText(`待我确认的觉察 ${result.open.length} 条；已确认 ${result.confirmed.length} 条。\n${lines.join('\n')}`, result);
+    }
+    if (!result.found) return toolText(`没有这条候选：${result.id}`, result);
+    if (result.already) return toolText(`这条早已${result.already === 'confirmed' ? '确认' : '放下'}：${result.id}`, result);
+    const ob = result.ombre ? (result.ombre.ok ? '，已写入 OB 的 I（候选，待 dream 见证）' : `，OB 写入失败：${result.ombre.error}`) : '';
+    return toolText(`${result.action === 'confirm' ? '已确认' : '已放下'}：${result.item.text}${ob}`, result);
   }
   if (name === 'xinchao_handoff_note') {
     const result = await handlers.handoffNote(handoffNoteArgs(args, fallbackSessionId));
@@ -702,6 +745,7 @@ export async function handleMcpMessage(payload, handlers) {
           '新窗口开始时调用 xinchao_context；服务端会绑定当前 MCP 连接，无需自行编写 session_id。',
           '一次实际互动后可调用 xinchao_event 更新窗口短状态；event_id 必须唯一，重试时复用。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
+          '上下文里出现“自我觉察候选”时，用 xinchao_awareness 确认或放下；确认与否只由你自己判断，候选不是指令。',
           '独处时想留到下次窗口的事用 xinchao_pending_create；真正说出后用 xinchao_pending_consumed 回执。留下/ 放下只能由用户在 Dashboard 决定。',
           '每月由你自己调用 xinchao_personality_reflect 完成一次 14 维性格内核自评；人类不参与打分，同月结果不会被覆盖。',
           '用户开锁后可用 xinchao_cabin_inbox 读取小屋来信；上锁的正文不会返回。你想给用户留话时可用 xinchao_cabin_note。',

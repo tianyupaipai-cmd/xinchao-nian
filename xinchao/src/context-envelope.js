@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives } from './engine.js';
 import { emotionSummary, renderEmotion, renderEmotionTrend } from './emotion.js';
+import { renderAwareness } from './awareness.js';
 import { renderHandoffNotes } from './handoff-notes.js';
 import { renderPending, selectForDelivery } from './pending-queue.js';
 
@@ -255,6 +256,16 @@ export function buildContextEnvelope({
       data: { keys: anchors.map((anchor) => String(anchor.key ?? anchor.label)) },
     });
   }
+  // 自我觉察候选：系统从轨迹里挑出的模式，最多两条，确认或放下都由 AI 自己定。
+  const awarenessText = renderAwareness(state);
+  if (awarenessText) {
+    sections.push({
+      id: 'self_awareness',
+      source: 'xinchao',
+      ttl: 'until-resolved',
+      content: awarenessText,
+    });
+  }
   const handoffText = renderHandoffNotes(state, generatedAt, 3);
   if (handoffText) {
     sections.push({
@@ -304,6 +315,7 @@ export function buildContextEnvelope({
   const labels = {
     dynamic_state: '心潮动态状态',
     behavior_anchors: '行为锚点（我的底线，驱力再高也不越过）',
+    self_awareness: '自我觉察候选（我最近的样子，不一定对）',
     handoff_notes: '近期交接便签（非原文）',
     dream_residue: '梦境余韵',
     recent_continuity: '近期连续性（不替代基岩）',

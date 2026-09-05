@@ -289,7 +289,9 @@ export function recordEmotionSample(state, now = new Date(), options = {}) {
   const labelChanged = !last || last.label !== emotion.label;
   const minGap = cause ? SAMPLE_IMPULSE_GAP_MS : SAMPLE_SETTLE_GAP_MS;
   if (!options.force && !labelChanged && gap < minGap) return { recorded: false };
-  const sample = { at: iso(now), valence: emotion.valence, arousal: emotion.arousal, label: emotion.label, cause };
+  const drives = state.drives && typeof state.drives === 'object' ? Object.entries(state.drives) : [];
+  const top = drives.length ? drives.sort((a, b) => Number(b[1]) - Number(a[1]))[0][0] : null;
+  const sample = { at: iso(now), valence: emotion.valence, arousal: emotion.arousal, label: emotion.label, cause, top };
   state.emotionJournal.push(sample);
   state.emotionJournal = state.emotionJournal.slice(-JOURNAL_MAX_SAMPLES);
   const key = dayKey(now, options.timeZone);

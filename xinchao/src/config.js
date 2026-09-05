@@ -139,6 +139,10 @@ export function loadConfig() {
       // 3.3：情绪层调制驱力自然增速（难受更惦记、开心更想分享）。只改增速不加数值。
       emotionModulationEnabled: bool('EMOTION_MODULATION_ENABLED', true),
     },
+    // 3.3 自我觉察：每天一次从轨迹里挑候选；确认后是否写 OB 的 I 取决于 OMBRE_WRITE_ENABLED。
+    awareness: {
+      enabled: bool('AWARENESS_ENABLED', true),
+    },
     daytime: {
       enabled: bool('DAYTIME_EMERGENCE_ENABLED', false),
       timeZone: process.env.DAYTIME_TIME_ZONE ?? 'Asia/Shanghai',

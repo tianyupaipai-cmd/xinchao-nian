@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadConfig, validateConfig } from './config.js';
 import { emotionCoords, stampEmotionArgs } from './emotion.js';
+import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
 import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
 import { selectUniqueBark } from './bark-dedupe.js';
@@ -188,6 +189,19 @@ async function runCycle() {
     });
 
     let state = settled.state;
+    // 自我觉察：每天扫一次（上海日期变了才扫），从轨迹里挑候选。只加候选，不动别的。
+    if (config.awareness.enabled) {
+      const preview = scanAwareness(state, now, { timeZone: config.settle.timeZone });
+      if (preview.changed) {
+        state = await updateState({
+          type: 'awareness_scan',
+          source: 'timer',
+          details: { added: preview.added.length, kinds: preview.added.map((c) => c.kind) },
+          at: now,
+        }, (latest) => scanAwareness(latest, now, { timeZone: config.settle.timeZone }).state);
+        if (preview.added.length) log('awareness_candidates', { added: preview.added.map((c) => `${c.kind}:${c.subject}`) });
+      }
+    }
     let dreamCreated = false;
     let barkSent = false;
     let daytimeSent = false;
@@ -335,7 +349,7 @@ async function runCycle() {
             source: 'resonance',
             details: { kind: 'autonomous_thought', domains: domains.slice(0, 8).join(',') },
             at: now,
-          }, (latest) => applyMemoryResonance(latest, domains, now, config.resonance).state);
+          }, (latest) => { const next = applyMemoryResonance(latest, domains, now, config.resonance).state; recordSurfacing(next, domains, now); return next; });
           log('memory_resonance', { kind: 'autonomous_thought', domains: domains.length, revision: state.revision });
         }
       }
@@ -420,7 +434,7 @@ async function runCycle() {
               source: 'resonance',
               details: { kind: 'daytime_emergence', domains: domains.slice(0, 8).join(',') },
               at: now,
-            }, (latest) => applyMemoryResonance(latest, domains, now, config.resonance).state);
+            }, (latest) => { const next = applyMemoryResonance(latest, domains, now, config.resonance).state; recordSurfacing(next, domains, now); return next; });
             log('memory_resonance', { kind: 'daytime_emergence', domains: domains.length, revision: state.revision });
           }
         }
@@ -860,6 +874,44 @@ async function consumePendingOutputs(ids, source = 'mcp', now = new Date()) {
   return { consumed, revision: state.revision };
 }
 
+// 自我觉察工具：list / confirm / dismiss / scan。确认时若 OB 写开关打开，经 I 沉淀为候选自我认知。
+async function handleAwareness(input = {}, now = new Date()) {
+  const action = String(input.action ?? 'list').trim().toLowerCase();
+  if (action === 'list') return { action, ...awarenessSummary(await store.read()) };
+  if (action === 'scan') {
+    const state = await updateState({ type: 'awareness_scan', source: 'mcp', at: now },
+      (latest) => scanAwareness(latest, now, { timeZone: config.settle.timeZone, force: true }).state);
+    return { action, ...awarenessSummary(state) };
+  }
+  if (action !== 'confirm' && action !== 'dismiss') throw new Error('action 必须是 list / confirm / dismiss / scan');
+  const id = String(input.id ?? '').trim();
+  if (!id) throw new Error('confirm / dismiss 需要 id');
+  const current = await store.read();
+  const probe = resolveAwareness(current, id, action === 'confirm' ? 'confirmed' : 'dismissed', {}, now);
+  if (!probe.found) return { action, found: false, id };
+  if (probe.already) return { action, found: true, already: probe.already, id };
+  let ombre = null;
+  if (action === 'confirm' && config.ombre.writeEnabled && !config.shadowMode) {
+    const content = String(input.text ?? probe.item.text ?? '').trim();
+    const aspect = String(input.aspect ?? probe.item.aspect ?? 'patterns');
+    try {
+      const reply = await ombre.writeSelfAwareness(content, aspect);
+      ombre = { ok: true, aspect, reply: reply.slice(0, 200) };
+    } catch (error) {
+      ombre = { ok: false, aspect, error: String(error.message ?? error).slice(0, 200) };
+      log('awareness_ombre_write_failed', { id, message: error.message });
+    }
+  }
+  const state = await updateState({
+    type: action === 'confirm' ? 'awareness_confirm' : 'awareness_dismiss',
+    source: 'mcp',
+    details: { id, kind: probe.item.kind, ombre: ombre ? ombre.ok : null },
+    at: now,
+  }, (latest) => resolveAwareness(latest, id, action === 'confirm' ? 'confirmed' : 'dismissed', { text: input.text, note: input.note, aspect: input.aspect, ombre }, now).state);
+  const item = state.awareness.candidates.find((c) => c.id === id);
+  return { action, found: true, id, item, ombre };
+}
+
 async function saveHandoffNote(note, source = 'mcp', now = new Date()) {
   let applied;
   const state = await updateState({
@@ -1231,6 +1283,7 @@ const server = createServer(async (request, response) => {
           };
         },
         handoffNote: async (note) => saveHandoffNote(note, 'mcp'),
+        awareness: async (input) => handleAwareness(input),
         pendingCreate: async (input) => createPendingOutput(input, 'mcp'),
         pendingConsumed: async ({ ids }) => consumePendingOutputs(ids, 'mcp'),
         personalityReflect: async (input) => personality.recordAiAssessment(input),

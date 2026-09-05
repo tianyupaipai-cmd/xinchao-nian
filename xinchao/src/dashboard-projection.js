@@ -1,6 +1,7 @@
 import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
 import { buildConnectionDiagnostics } from './connection-diagnostics.js';
 import { emotionSummary } from './emotion.js';
+import { awarenessSummary } from './awareness.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, Number(value) || 0));
 
@@ -168,6 +169,8 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
       days: state.emotionDays && typeof state.emotionDays === 'object' ? state.emotionDays : {},
     },
     personality: projectedPersonality(personalityCore, config),
+    // 自我觉察（3.3）：候选与已确认，文本是关于 AI 自己的模式描述，不含对话正文。
+    awareness: awarenessSummary(state),
     thoughts: projectedThoughts(state, Boolean(config.dashboard?.includePrivateText)),
     dreams: projectedDreams(
       state,

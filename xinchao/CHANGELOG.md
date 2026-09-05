@@ -39,6 +39,17 @@
 - 上下文信封在情绪有变化时多一行"近24小时情绪走过：平静→低落→安心（conflict×1，reconciliation×1）"；
   Dashboard `emotion` 下新增 `journal`（最近 48 条）与 `days`。
 
+### 自我觉察（Self-Awareness）
+
+- 新增 `awareness` 层：每天一次（上海日期变化时）从情绪日志、驱力采样、持续念头、浮现记忆域和互动类型里
+  按规则挑出"我最近的样子"的候选（一周基调、反复触发、最常冒头的驱力、缠人的念头、绕着同一域的记忆），
+  写成一句第一人称的话。七天内同一模式不重复提，待确认上限 8 条。
+- 新工具 `xinchao_awareness`（list / confirm / dismiss / scan）：确认与放下只由 AI 自己定；确认时可换成自己的措辞，
+  若 `OMBRE_WRITE_ENABLED` 打开则经 OB 的 `I` 沉淀为候选自我认知（之后仍要被 dream 见证才升正式条目，不越过 OB 的规矩）。
+- 上下文信封新增 `self_awareness` 段（最多两条候选 + 一句"不一定对，自己定"），排在行为锚点之后；Dashboard 新增 `awareness`。
+- 记忆共振时顺手记下浮现的域（`recentSurfacings`，只存域名与时间）；情绪日志样本新增当时排第一的驱力 `top`。
+- 这层不改驱力、情绪或人格；人格与锚点仍只在月评/锚点工具里由 AI 自己改，觉察只是把镜子举起来。新开关 `AWARENESS_ENABLED`。
+
 ## 3.2.0 — 2026-08-21
 
 ### 行为锚点（Behavior Anchors）
