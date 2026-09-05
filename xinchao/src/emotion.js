@@ -70,6 +70,7 @@ export function ensureEmotion(state, now = new Date()) {
   const current = state.emotion && typeof state.emotion === 'object' ? state.emotion : null;
   if (!current || !Number.isFinite(Number(current.valence)) || !Number.isFinite(Number(current.arousal))) {
     state.emotion = newEmotion(now);
+    ensureEmotionJournal(state);
     return state.emotion;
   }
   current.valence = round4(current.valence);
@@ -78,6 +79,7 @@ export function ensureEmotion(state, now = new Date()) {
   current.lastCause = current.lastCause ? String(current.lastCause).slice(0, 80) : null;
   current.lastCauseAt = current.lastCauseAt ?? null;
   current.updatedAt = current.updatedAt ?? iso(now);
+  ensureEmotionJournal(state);
   return current;
 }
 
@@ -125,6 +127,7 @@ export function applyEmotionImpulse(state, impulse = {}, cause = '', now = new D
     emotion.lastCauseAt = iso(now);
   }
   const changed = emotion.valence !== before.valence || emotion.arousal !== before.arousal;
+  if (changed) recordEmotionSample(state, now, { cause });
   return { changed, emotion, applied: { valence: round4(emotion.valence - before.valence + 0.5) - 0.5, arousal: round4(emotion.arousal - before.arousal + 0.5) - 0.5 } };
 }
 
@@ -152,16 +155,15 @@ export function settleEmotion(state, elapsedHours = 0, options = {}) {
   emotion.valence = round4(decay(emotion.valence, target.valence, VALENCE_HALF_LIFE_HOURS));
   emotion.arousal = round4(decay(emotion.arousal, target.arousal, AROUSAL_HALF_LIFE_HOURS));
   emotion.label = emotionLabel(emotion.valence, emotion.arousal);
-  return {
-    changed: emotion.valence !== before.valence || emotion.arousal !== before.arousal || emotion.label !== before.label,
-    emotion,
-    target,
-  };
+  const changed = emotion.valence !== before.valence || emotion.arousal !== before.arousal || emotion.label !== before.label;
+  const sampled = recordEmotionSample(state, options.now ?? new Date(), { timeZone: options.timeZone }).recorded;
+  return { changed: changed || sampled, emotion, target };
 }
 
-export function emotionSummary(state) {
+export function emotionSummary(state, now = new Date()) {
   const emotion = state?.emotion && typeof state.emotion === 'object' ? state.emotion : newEmotion();
   return {
+    trend: emotionTrend(state, now, 24),
     valence: round4(emotion.valence),
     arousal: round4(emotion.arousal),
     label: emotionLabel(emotion.valence, emotion.arousal),
@@ -244,4 +246,85 @@ export function emotionGrowthFactor(driveKey, emotion) {
   const dv = clamp((v - 0.5) * 2, -1, 1);
   const da = clamp((a - EMOTION_BASELINE.arousal) / 0.7, -1, 1);
   return Number(clamp(1 + mod.valence * dv + mod.arousal * da, MODULATION_FLOOR, MODULATION_CEIL).toFixed(4));
+}
+
+// ── 情绪日志（3.3 第五块，自我觉察的第一份原料）────────────────────────
+// 当下值只回答"我现在怎样"，觉察需要的是"我这阵子怎样"。日志两层：
+//   samples：逐条采样（结算时每 ≥2h 一条；事件脉冲时标签变了或隔 ≥30min 一条，带成因），最多保留 30 天/600 条；
+//   days：按天（Asia/Shanghai）聚合的摘要——均值、最低愉悦、最高唤醒、各标签次数、各成因次数，保留 30 天。
+// 不存正文，只存坐标、词和互动类型名。
+const JOURNAL_MAX_SAMPLES = 600;
+const JOURNAL_MAX_DAYS = 30;
+const SAMPLE_SETTLE_GAP_MS = 2 * 3_600_000;
+const SAMPLE_IMPULSE_GAP_MS = 30 * 60_000;
+
+function dayKey(at, timeZone = 'Asia/Shanghai') {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at));
+  } catch {
+    return iso(at).slice(0, 10);
+  }
+}
+
+export function ensureEmotionJournal(state) {
+  state.emotionJournal = Array.isArray(state.emotionJournal) ? state.emotionJournal.slice(-JOURNAL_MAX_SAMPLES) : [];
+  state.emotionDays = state.emotionDays && typeof state.emotionDays === 'object' ? state.emotionDays : {};
+  return state;
+}
+
+function pruneDays(days, now) {
+  const keys = Object.keys(days).sort();
+  const cutoff = dayKey(new Date(new Date(now).getTime() - JOURNAL_MAX_DAYS * 86_400_000));
+  for (const key of keys) if (key < cutoff) delete days[key];
+  return days;
+}
+
+export function recordEmotionSample(state, now = new Date(), options = {}) {
+  ensureEmotionJournal(state);
+  const emotion = ensureEmotion(state, now);
+  const cause = options.cause ? String(options.cause).slice(0, 80) : null;
+  const last = state.emotionJournal.at(-1);
+  const nowMs = new Date(now).getTime();
+  const gap = last ? nowMs - Date.parse(last.at) : Infinity;
+  const labelChanged = !last || last.label !== emotion.label;
+  const minGap = cause ? SAMPLE_IMPULSE_GAP_MS : SAMPLE_SETTLE_GAP_MS;
+  if (!options.force && !labelChanged && gap < minGap) return { recorded: false };
+  const sample = { at: iso(now), valence: emotion.valence, arousal: emotion.arousal, label: emotion.label, cause };
+  state.emotionJournal.push(sample);
+  state.emotionJournal = state.emotionJournal.slice(-JOURNAL_MAX_SAMPLES);
+  const key = dayKey(now, options.timeZone);
+  const day = state.emotionDays[key] ?? { samples: 0, meanValence: 0, meanArousal: 0, minValence: 1, maxArousal: 0, labels: {}, causes: {} };
+  day.meanValence = round4((day.meanValence * day.samples + emotion.valence) / (day.samples + 1));
+  day.meanArousal = round4((day.meanArousal * day.samples + emotion.arousal) / (day.samples + 1));
+  day.minValence = Math.min(day.minValence, emotion.valence);
+  day.maxArousal = Math.max(day.maxArousal, emotion.arousal);
+  day.samples += 1;
+  day.labels[emotion.label] = (day.labels[emotion.label] ?? 0) + 1;
+  if (cause) day.causes[cause] = (day.causes[cause] ?? 0) + 1;
+  state.emotionDays[key] = day;
+  pruneDays(state.emotionDays, now);
+  return { recorded: true, sample };
+}
+
+// 近 N 小时的走势：去重后的标签序列 + 成因计数。给信封和觉察用。
+export function emotionTrend(state, now = new Date(), hours = 24) {
+  const since = new Date(now).getTime() - hours * 3_600_000;
+  const samples = (state?.emotionJournal ?? []).filter((item) => Date.parse(item.at) >= since);
+  const labels = [];
+  const causes = {};
+  let minValence = 1;
+  let maxArousal = 0;
+  for (const item of samples) {
+    if (labels.at(-1) !== item.label) labels.push(item.label);
+    if (item.cause) causes[item.cause] = (causes[item.cause] ?? 0) + 1;
+    minValence = Math.min(minValence, item.valence);
+    maxArousal = Math.max(maxArousal, item.arousal);
+  }
+  return { hours, samples: samples.length, labels, causes, minValence: samples.length ? round4(minValence) : null, maxArousal: samples.length ? round4(maxArousal) : null };
+}
+
+export function renderEmotionTrend(trend) {
+  if (!trend || trend.samples < 2 || trend.labels.length < 2) return '';
+  const causes = Object.entries(trend.causes).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k}×${n}`).join('，');
+  return `近${trend.hours}小时情绪走过：${trend.labels.join('→')}${causes ? `（${causes}）` : ''}`;
 }

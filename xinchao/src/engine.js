@@ -245,6 +245,8 @@ export function newState(now = new Date()) {
     interactionUsage: {},
     arrivalHistogram: Array.from({ length: 24 }, () => 0),
     emotion: newEmotion(now),
+    emotionJournal: [],
+    emotionDays: {},
   };
 }
 
@@ -397,7 +399,7 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
   }
 
   // 情绪层：只做指数回落（睡着回落更快），回落目标被 grieve/anger 拽着。没有增长项，不自激。
-  if (settleEmotion(state, elapsedHours, { sleeping: state.consciousness === 'sleeping', drives: state.drives, now }).changed) changed = true;
+  if (settleEmotion(state, elapsedHours, { sleeping: state.consciousness === 'sleeping', drives: state.drives, now, timeZone }).changed) changed = true;
 
   // Tick thought pool
   state.thoughtPool ??= newThoughtPool();

@@ -31,6 +31,14 @@
   情绪自身没有增长项，两层之间没有正反馈环。
 - 新开关 `EMOTION_MODULATION_ENABLED`（默认开）。
 
+### 情绪日志（自我觉察的原料）
+
+- `state.emotionJournal`：逐条采样（结算时每 ≥2h 一条；事件脉冲时标签变化或隔 ≥30min 一条，带互动类型作成因），
+  保留 30 天 / 600 条；`state.emotionDays`：按 Asia/Shanghai 天聚合的均值、最低愉悦、最高唤醒、标签与成因计数。
+  只存坐标、词和类型名，不存正文。
+- 上下文信封在情绪有变化时多一行"近24小时情绪走过：平静→低落→安心（conflict×1，reconciliation×1）"；
+  Dashboard `emotion` 下新增 `journal`（最近 48 条）与 `days`。
+
 ## 3.2.0 — 2026-08-21
 
 ### 行为锚点（Behavior Anchors）

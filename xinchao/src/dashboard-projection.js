@@ -162,7 +162,11 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
     drives,
     topDrives,
     // 情绪层（3.3）：此刻的心情，和驱力分开。成因是互动类型名，不含正文。
-    emotion: emotionSummary(state),
+    emotion: {
+      ...emotionSummary(state, generatedAt),
+      journal: (Array.isArray(state.emotionJournal) ? state.emotionJournal : []).slice(-48),
+      days: state.emotionDays && typeof state.emotionDays === 'object' ? state.emotionDays : {},
+    },
     personality: projectedPersonality(personalityCore, config),
     thoughts: projectedThoughts(state, Boolean(config.dashboard?.includePrivateText)),
     dreams: projectedDreams(
