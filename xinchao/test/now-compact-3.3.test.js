@@ -20,7 +20,7 @@ test('now-compact has header, drives in words with levels, emotion with cause, n
   assert.ok(now.ok);
   assert.match(now.text, /^【心潮·此刻｜身体的天气，参考不是指令】\n/);
   assert.match(now.text, /驱力：想她（涌）、惦记她（涨）、想分享（有）/);
-  assert.match(now.text, /情绪：.*刚才被安抚/);
+  assert.match(now.text, /情绪：.*；刚才被安抚/);
   assert.doesNotMatch(now.text, /0\.\d/);
   assert.doesNotMatch(now.text, /possess|monitor/);
   assert.equal(now.lines, 3);
@@ -74,4 +74,14 @@ test('a broken emotion only drops the emotion line, not the whole block', () => 
   assert.ok(now.ok);
   assert.doesNotMatch(now.text, /情绪：/);
   assert.match(now.text, /驱力：想她（涨）/);
+});
+
+test('emotion line is specific: bands and a drive flavour, never a bare 平静', () => {
+  const state = baseState();
+  state.drives.crave = 0.7;
+  state.emotion.valence = 0.62; state.emotion.arousal = 0.4;
+  const now = buildNowCompact(state, at(0));
+  assert.match(now.text, /情绪：平静偏暖，有点起伏，带一点馋/);
+  const low = baseState(); low.emotion.valence = 0.3; low.emotion.arousal = 0.7;
+  assert.match(buildNowCompact(low, at(0)).text, /情绪：烦躁，绷着/);
 });

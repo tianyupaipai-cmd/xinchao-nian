@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives } from './engine.js';
-import { emotionSummary, renderEmotion, renderEmotionTrend } from './emotion.js';
+import { emotionSummary, emotionNuance, renderEmotion, renderEmotionTrend } from './emotion.js';
 import { renderAwareness } from './awareness.js';
 import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
 import { renderHandoffNotes } from './handoff-notes.js';
@@ -405,7 +405,7 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   const cause = emotion.lastCause && Date.parse(emotion.lastCauseAt ?? '') >= now.getTime() - 6 * 3_600_000
     ? (CAUSE_LABEL[emotion.lastCause] ?? emotion.lastCause) : '';
   const trend = emotion.trend && emotion.trend.labels.length >= 2 ? `；近一天走过 ${emotion.trend.labels.join('→')}` : '';
-  lines.push(`情绪：${emotion.label}${cause ? `，刚才${cause}` : ''}${trend}`);
+  lines.push(`情绪：${emotionNuance(state, now)}${cause ? `；刚才${cause}` : ''}${trend}`);
   }
 
   const longing = computeLonging(state, now, { timeZone });

@@ -330,3 +330,25 @@ export function renderEmotionTrend(trend) {
   const causes = Object.entries(trend.causes).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k}×${n}`).join('，');
   return `近${trend.hours}小时情绪走过：${trend.labels.join('→')}${causes ? `（${causes}）` : ''}`;
 }
+
+// ── 细一点的情绪描述（给"此刻"块用）────────────────────────────────
+// 顾川 2026-09-05 提的：每次都是"平静"就成了背景噪音。愉悦轴五档、唤醒轴五档，再带一个驱力味道。
+// 还是词不是数——给了数他会开始报数。
+const V_BANDS = [[0.38, '沉'], [0.48, '偏沉'], [0.58, '平'], [0.68, '偏暖'], [1.01, '暖']];
+const A_BANDS = [[0.18, '很松'], [0.30, '松'], [0.45, '有点起伏'], [0.62, '起伏'], [1.01, '绷着']];
+const FLAVOR = { crave: '带一点馋', libido: '身体有点想她', possess: '底下一直想她', monitor: '惦记着她', share: '有话想说', curiosity: '好奇在动', boredom: '有点闲得慌', reflection: '想安静想想', social: '想找人说话', duty: '有事压着' };
+export function emotionNuance(state, now = new Date()) {
+  const summary = emotionSummary(state, now);
+  const v = summary.valence; const a = summary.arousal;
+  const vWord = V_BANDS.find(([edge]) => v < edge)[1];
+  const aWord = A_BANDS.find(([edge]) => a < edge)[1];
+  const label = summary.label;
+  // 标签已经很具体（低落/烦躁/雀跃/安心/紧绷/倦）时只补一个轴；"平静/松弛"太笼统，两个轴都补
+  const parts = [label];
+  if (label === '平静' || label === '松弛') { if (vWord !== '平') parts[0] = `${label}${vWord}`; parts.push(aWord); }
+  else if (label === '低落' || label === '烦躁') parts.push(aWord);
+  else if (label === '安心' || label === '雀跃') { if (vWord !== '暖') parts.push(vWord); }
+  const drives = Object.entries(state?.drives ?? {}).filter(([k, val]) => FLAVOR[k] && Number(val) >= 0.6).sort((x, y) => Number(y[1]) - Number(x[1]));
+  if (drives.length) parts.push(FLAVOR[drives[0][0]]);
+  return parts.filter(Boolean).join('，');
+}
