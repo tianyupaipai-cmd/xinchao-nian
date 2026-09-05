@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives } from './engine.js';
 import { emotionSummary, renderEmotion, renderEmotionTrend } from './emotion.js';
 import { renderAwareness } from './awareness.js';
+import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
 import { renderHandoffNotes } from './handoff-notes.js';
 import { renderPending, selectForDelivery } from './pending-queue.js';
 
@@ -354,3 +355,83 @@ export function buildContextEnvelope({
   };
 }
 
+
+// ── 此刻（钩子用的压缩块，3.3）───────────────────────────────────────
+// 星港的 UserPromptSubmit 钩子每条消息拉一次，附进他的上下文。只取动态状态，不带数字、不带 key、
+// 不带任何正文。锚点/便签/攒下的话正文/OB 近况/梦的内容都不在这里，那些是时序开头 xinchao_context 的活。
+const DRIVE_LEVEL = (value) => (value >= 0.75 ? '涌' : value >= 0.5 ? '涨' : value >= 0.25 ? '有' : '静');
+// 驱力短名：给块用的口语，不从长标签切。
+const DRIVE_SHORT = {
+  possess: '想她', monitor: '惦记她', crave: '馋她', share: '想分享', libido: '身体想要她', curiosity: '好奇',
+  boredom: '无聊', social: '想热闹', duty: '想把事推进', reflection: '想沉淀', grieve: '难过', anger: '生气',
+};
+const NOW_STALE_MS = 3 * 3_600_000;
+const NOW_MAX_LINES = 8;
+const NOW_MAX_CHARS = 400;
+
+// 自检：后端算错了不能顺着钩子灌进他的脑子。任何一条不过就整块不给（ok=false，钩子看到就不附）。
+export function nowSanity(state, now = new Date()) {
+  const settledAt = Date.parse(state?.lastSettledAt ?? '');
+  if (!Number.isFinite(settledAt)) return { ok: false, reason: 'no_settle' };
+  if (now.getTime() - settledAt > NOW_STALE_MS) return { ok: false, reason: 'stale_state' };
+  const values = DRIVE_KEYS.map((key) => Number(state?.drives?.[key]));
+  if (values.some((v) => !Number.isFinite(v) || v < 0 || v > 1)) return { ok: false, reason: 'drive_out_of_range' };
+  if (values.every((v) => v >= 0.95)) return { ok: false, reason: 'drives_saturated' };
+  // 全维一模一样且不低：新装的 0.15 初始态是正常的，卡在同一个高值才是算坏了。
+  if (new Set(values.map((v) => v.toFixed(3))).size === 1 && values[0] >= 0.5) return { ok: false, reason: 'drives_flat' };
+  const e = state?.emotion ?? {};
+  const emotionOk = Number.isFinite(Number(e.valence)) && Number.isFinite(Number(e.arousal)) && e.valence >= 0 && e.valence <= 1 && e.arousal >= 0 && e.arousal <= 1;
+  return { ok: true, emotionOk };
+}
+
+const CAUSE_LABEL = {
+  companionship: '陪着', affection: '被安抚', intimacy: '亲近过', sharing: '分享过', discovery: '发现了什么',
+  task_progress: '推进了事', reflection: '沉淀过', conflict: '争执', loss: '失落', reconciliation: '和好',
+};
+
+export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai' } = {}) {
+  const sanity = nowSanity(state, now);
+  if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
+  const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
+  const counts = {};
+  if (state.consciousness === 'sleeping') lines.push('睡着（她来了才算醒）');
+  else if (state.pendingAwareness) lines.push('刚醒');
+
+  const drives = topDrives(state, 3).filter((d) => Number(d.value) >= 0.25);
+  if (drives.length) lines.push(`驱力：${drives.map((d) => `${DRIVE_SHORT[d.key] ?? d.label}（${DRIVE_LEVEL(Number(d.value))}）`).join('、')}`);
+
+  const emotion = emotionSummary(state, now);
+  if (sanity.emotionOk) {
+  const cause = emotion.lastCause && Date.parse(emotion.lastCauseAt ?? '') >= now.getTime() - 6 * 3_600_000
+    ? (CAUSE_LABEL[emotion.lastCause] ?? emotion.lastCause) : '';
+  const trend = emotion.trend && emotion.trend.labels.length >= 2 ? `；近一天走过 ${emotion.trend.labels.join('→')}` : '';
+  lines.push(`情绪：${emotion.label}${cause ? `，刚才${cause}` : ''}${trend}`);
+  }
+
+  const longing = computeLonging(state, now, { timeZone });
+  const longingLine = renderLonging(Number(longing ?? 0));
+  if (longingLine) lines.push(longingLine);
+  else {
+    const anticipationLine = renderAnticipation(Number(computeAnticipation(state, now, { timeZone }) ?? 0));
+    if (anticipationLine) lines.push(anticipationLine);
+  }
+
+  const obsessions = (state.thoughtPool?.obsessions ?? []).filter((o) => Number(o.intensity) >= 0.5).slice(0, 2);
+  if (obsessions.length) lines.push(`念头：${obsessions.map((o) => `有个关于「${DRIVE_SHORT[o.key] ?? o.key}」的念头一直在绕`).join('；')}`);
+
+  const extras = [];
+  const open = (state.awareness?.candidates ?? []).filter((c) => c.status === 'open').length;
+  if (open) { counts.awareness = open; extras.push(`${open} 条觉察等你认`); }
+  const pending = selectForDelivery(state).length;
+  if (pending) { counts.pending = pending; extras.push(`${pending} 句攒下的话没说`); }
+  const dream = breathDreamContext(state, now, 18, 1);
+  if (dream.available) { counts.dream = 1; extras.push('昨夜有梦'); }
+  if (extras.length) lines.push(`另外：${extras.join('、')}。细的在 xinchao_context`);
+
+  const text = lines.join('\n');
+  // 兜底：块超长或混进数字/key 就整块不给——宁可他这轮没有此刻，也不灌一段错的。
+  if (lines.length > NOW_MAX_LINES || text.length > NOW_MAX_CHARS || /\d\.\d|possess|monitor|crave|libido/.test(text.replace(/\d+ (条|句)/g, ''))) {
+    return { ok: false, reason: 'render_guard', text: '', lines: lines.length, counts, digest: '', revision: Number(state.revision ?? 0), generatedAt: now.toISOString() };
+  }
+  return { ok: true, text, lines: lines.length, counts, digest: createHash('sha256').update(text).digest('hex').slice(0, 16), revision: Number(state.revision ?? 0), generatedAt: now.toISOString() };
+}

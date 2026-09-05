@@ -11,7 +11,7 @@ import { ModelClient } from './model-client.js';
 import { OmbreClient, parseSurfacedDomains } from './ombre-client.js';
 import { BarkClient } from './bark-client.js';
 import { readOmbreHeartbeat } from './heartbeat-store.js';
-import { buildContextEnvelope, contextDeliveryState, recordContextDelivery } from './context-envelope.js';
+import { buildContextEnvelope, contextDeliveryState, recordContextDelivery, buildNowCompact } from './context-envelope.js';
 import { TransitionJournal } from './transition-journal.js';
 import { handleMcpMessage } from './mcp-protocol.js';
 import { OAuthProvider } from './oauth-provider.js';
@@ -1340,6 +1340,11 @@ const server = createServer(async (request, response) => {
         ...breathDreamContext(state, new Date()),
         generatedAt: new Date().toISOString(),
       });
+    }
+    // 钩子用的"此刻"压缩块：只读状态，不记投递、不动 pending。星港 UserPromptSubmit 每条消息拉一次。
+    if (request.method === 'GET' && url.pathname === '/v1/now') {
+      const state = await store.read();
+      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone }));
     }
     if (request.method === 'GET' && url.pathname === '/v1/context') {
       if (!config.context.enabled) return send(response, 503, { error: 'context envelope disabled' });
