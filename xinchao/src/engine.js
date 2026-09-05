@@ -3,6 +3,7 @@ import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimens
 import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought } from './thought-pool.js';
 import { tickPending } from './pending-queue.js';
 import { ensureAwareness } from './awareness.js';
+import { ensureSelfSignals } from './self-signals.js';
 import { INTERACTION_EMOTION, applyEmotionImpulse, blendEmotionTowardTone, emotionGrowthFactor, ensureEmotion, newEmotion, settleEmotion } from './emotion.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
@@ -70,6 +71,7 @@ function ensureStateShape(state) {
     : Array.from({ length: 24 }, () => 0);
   ensureEmotion(state);
   ensureAwareness(state);
+  ensureSelfSignals(state);
   state.schemaVersion = Math.max(9, Number(state.schemaVersion) || 0);
   return state;
 }

@@ -100,6 +100,8 @@ export function loadConfig() {
       maxEntries: number('BRIDGE_MAX_ENTRIES', 500, 10, 5000),
       ttlHours: number('BRIDGE_TTL_HOURS', 168, 1, 720),
       pollSeconds: number('BRIDGE_POLL_SECONDS', 15, 2, 300),
+      // 3.3：心潮自身信号（驱力冲顶/情绪转折/挂念/醒来余韵/觉察）经桥递到 AI 窗口。默认关。
+      selfSignals: bool('BRIDGE_SELF_SIGNALS', false),
     },
     cabin: {
       statePath: process.env.CABIN_STATE_PATH ?? '/app/state/cabin.json',

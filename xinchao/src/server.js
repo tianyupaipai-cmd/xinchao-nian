@@ -3,6 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadConfig, validateConfig } from './config.js';
 import { emotionCoords, stampEmotionArgs } from './emotion.js';
 import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
+import { detectSelfSignals } from './self-signals.js';
 import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
 import { selectUniqueBark } from './bark-dedupe.js';
@@ -200,6 +201,29 @@ async function runCycle() {
           at: now,
         }, (latest) => scanAwareness(latest, now, { timeZone: config.settle.timeZone }).state);
         if (preview.added.length) log('awareness_candidates', { added: preview.added.map((c) => `${c.kind}:${c.subject}`) });
+      }
+    }
+    // 心潮自身信号（3.3）：检测"发生了什么"，经桥递到窗口。先入队再记状态，入队失败不记（下轮再试）。
+    if (config.bridge.enabled && config.bridge.selfSignals) {
+      const preview = detectSelfSignals(state, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, longing: { timeZone: config.settle.timeZone, ...config.longing } });
+      if (preview.signals.length) {
+        let queued = 0;
+        for (const signal of preview.signals) {
+          try {
+            await bridgeQueue.enqueue({ eventId: signal.eventId, reason: 'self_signal', message: signal.text, ttlHours: preview.ttlHours }, now);
+            queued += 1;
+          } catch (error) { log('self_signal_enqueue_failed', { kind: signal.kind, message: error.message }); }
+        }
+        if (queued) await publishReadyBridgeDeliveries();
+      }
+      if (preview.changed) {
+        state = await updateState({
+          type: 'self_signals',
+          source: 'timer',
+          details: { signals: preview.signals.map((s) => `${s.kind}:${s.subject}`) },
+          at: now,
+        }, (latest) => detectSelfSignals(latest, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, longing: { timeZone: config.settle.timeZone, ...config.longing } }).state);
+        if (preview.signals.length) log('self_signals', { kinds: preview.signals.map((s) => `${s.kind}:${s.subject}`) });
       }
     }
     let dreamCreated = false;

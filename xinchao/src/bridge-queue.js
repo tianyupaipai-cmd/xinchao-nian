@@ -4,7 +4,8 @@ import { StateStore } from './state-store.js';
 export const BRIDGE_SERVER_PROTOCOL = 'xinchao-bridge-server/1';
 export const BRIDGE_STREAM_PROTOCOL = 'xinchao-bridge-stream/1';
 export const BRIDGE_RUNTIME_PROTOCOL = 'xinchao-runtime-wake/1';
-export const BRIDGE_REASONS = Object.freeze(['user_interaction', 'user_note', 'scheduled_interaction', 'user_feedback']);
+// self_signal：心潮自身信号（3.3），只有 BRIDGE_SELF_SIGNALS 打开时服务端才会入队；接收端可按 reason 区分渲染。
+export const BRIDGE_REASONS = Object.freeze(['user_interaction', 'user_note', 'scheduled_interaction', 'user_feedback', 'self_signal']);
 
 const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{5,159}$/;
 
@@ -44,7 +45,7 @@ export class BridgeQueue {
     await this.store.read();
   }
 
-  async enqueue({ eventId, reason, message, deliverAfter = null }, now = new Date()) {
+  async enqueue({ eventId, reason, message, deliverAfter = null, ttlHours = null }, now = new Date()) {
     const dedupeKey = compact(eventId, 120);
     const safeReason = compact(reason, 128);
     const safeMessage = compact(message, 4096);
@@ -53,7 +54,8 @@ export class BridgeQueue {
     if (!safeMessage) throw new Error('bridge message is required');
     const dueAt = deliverAfter ? new Date(deliverAfter) : now;
     if (!Number.isFinite(dueAt.getTime())) throw new Error('deliver_after must be an ISO timestamp');
-    const expiresAt = new Date(Math.max(now.getTime(), dueAt.getTime()) + this.ttlHours * 3_600_000);
+    const ttl = Number.isFinite(Number(ttlHours)) && Number(ttlHours) > 0 ? Number(ttlHours) : this.ttlHours;
+    const expiresAt = new Date(Math.max(now.getTime(), dueAt.getTime()) + ttl * 3_600_000);
     let result;
     await this.store.update((queue) => {
       queue.schemaVersion = 1;
