@@ -1,10 +1,10 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadConfig, validateConfig } from './config.js';
-import { emotionCoords, stampEmotionArgs } from './emotion.js';
+import { emotionCoords, emotionSummary, stampEmotionArgs } from './emotion.js';
 import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
 import { detectSelfSignals } from './self-signals.js';
-import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives } from './engine.js';
+import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
 import { selectUniqueBark } from './bark-dedupe.js';
 import { StateStore } from './state-store.js';
@@ -173,6 +173,43 @@ async function materialFromReferencedBuckets(recalled, maxLines = 7) {
   }
 }
 
+// 梦的推送（从 runCycle 里搬出来，3.3 改成早上发）：生成一句、去重、发 Bark、回流。
+async function sendDreamPush(state, dream, now) {
+  try {
+    let modelFailed = false;
+    const selected = await selectUniqueBark({
+      state,
+      onRejected: ({ attempt, similarity }) => log('bark_duplicate_rejected', { kind: 'dream', attempt, similarity }),
+      generate: async ({ recentMessages, rejectedMessage }) => {
+        if (modelFailed) return dream.residue;
+        try {
+          return await model.generateDreamPush({ dream, recentMessages, rejectedMessage });
+        } catch (error) {
+          modelFailed = true;
+          log('dream_push_model_failed', { message: error.message });
+          return dream.residue;
+        }
+      },
+    });
+    if (selected.reason === 'duplicate') log('bark_duplicate_skipped', { kind: 'dream', attempts: selected.attempts });
+    if (!selected.message) return state;
+    const result = await bark.send(selected.message);
+    if (!result.sent) return state;
+    state = await updateState({ type: 'bark_sent', source: 'bark', details: { barkSent: true, kind: 'dream' }, at: now },
+      (latest) => recordBark(latest, now, { kind: 'dream', message: selected.message }));
+    log('bark_sent', { kind: 'dream', revision: state.revision });
+    if (config.reflux.enabled) {
+      const expressed = topDrives(state)[0];
+      if (expressed) {
+        state = await updateState({ type: 'output_reflux', source: 'reflux', details: { kind: 'dream', drive: expressed.key }, at: now },
+          (latest) => applyOutputReflux(latest, expressed.key, selected.message, now, config.reflux.amount).state);
+        log('output_reflux', { kind: 'dream', drive: expressed.key, revision: state.revision });
+      }
+    }
+  } catch (error) { log('bark_failed', { kind: 'dream', message: error.message }); }
+  return state;
+}
+
 async function runCycle() {
   if (cyclePromise) return cyclePromise;
   cyclePromise = (async () => {
@@ -255,19 +292,32 @@ async function runCycle() {
       let sourceOmbreBucketIds = [];
       if (!config.shadowMode && config.ombre.readEnabled) {
         try {
-          const recalled = await ombre.recentMaterialWithRefs(topDrives(state), emotionForOmbre(state));
-          sourceOmbreBucketIds = recalled.bucketIds;
-          material = await materialFromReferencedBuckets(recalled);
+          // 3.3：原料换成"记忆正在消化的东西"（OB dream 全量，去技术类），消化里没东西再退回按驱力捞
+          const digest = await ombre.digestMaterial(48);
+          if (digest.text) { material = digest.text; sourceOmbreBucketIds = digest.bucketIds; }
+          else {
+            const recalled = await ombre.recentMaterialWithRefs(topDrives(state), emotionForOmbre(state));
+            sourceOmbreBucketIds = recalled.bucketIds;
+            material = await materialFromReferencedBuckets(recalled);
+          }
+          log('dream_material', { digestTotal: digest.total, kept: digest.kept, domains: digest.domains.slice(0, 8).join(',') });
         }
         catch (error) { log('ombre_read_failed', { message: error.message }); }
       }
+      let farMaterial = '';
+      if (!config.shadowMode && config.ombre.readEnabled) {
+        try { const far = await ombre.farMaterial(now); farMaterial = far.text; sourceOmbreBucketIds = [...new Set([...sourceOmbreBucketIds, ...far.bucketIds])]; }
+        catch (error) { log('ombre_far_failed', { message: error.message }); }
+      }
+      const avoid = state.recentDreams.slice(-3).map((d) => d.image || String(d.residue || '').slice(0, 30)).filter(Boolean);
+      const sleepHours = state.sleepStartedAt ? (now.getTime() - Date.parse(state.sleepStartedAt)) / 3_600_000 : null;
 
       let generated;
       if (config.shadowMode) {
         generated = new ModelClient({ ...config.model, enabled: false }).fallback(topDrives(state));
       } else {
         try {
-          generated = await model.generateDream({ state, material, topDrives: topDrives(state) });
+          generated = await model.generateDream({ state, material, farMaterial, topDrives: topDrives(state), avoid, emotion: emotionSummary(state, now), sleepHours });
         } catch (error) {
           log('dream_model_failed', { message: error.message });
           generated = new ModelClient({ ...config.model, enabled: false }).fallback(topDrives(state));
@@ -282,6 +332,8 @@ async function runCycle() {
         ombreBucketId: null,
         // 新字段只记梦由哪些真实记忆长出，老状态没有它也完全可读。
         sourceOmbreBucketIds,
+        driveKey: topDrives(state)[0]?.key ?? null,
+        sleepHours: sleepHours == null ? null : Number(sleepHours.toFixed(2)),
       };
       if (!config.shadowMode && config.ombre.writeEnabled) {
         try { dream.ombreBucketId = await ombre.storeDream(dream); }
@@ -300,53 +352,29 @@ async function runCycle() {
       dreamCreated = true;
       log('dream_settled', { source: dream.source, shadow: config.shadowMode, usedBreath: Boolean(material), revision: state.revision });
 
-      if (!config.shadowMode && config.bark.enabled && dreamContactIsIdle && barkAllowed(state, now, config.bark.minIntervalHours, config.bark.maxPerDay, 'dream')) {
-        try {
-          let modelFailed = false;
-          const selected = await selectUniqueBark({
-            state,
-            onRejected: ({ attempt, similarity }) => log('bark_duplicate_rejected', { kind: 'dream', attempt, similarity }),
-            generate: async ({ recentMessages, rejectedMessage }) => {
-              if (modelFailed) return dream.residue;
-              try {
-                return await model.generateDreamPush({ dream, recentMessages, rejectedMessage });
-              } catch (error) {
-                modelFailed = true;
-                log('dream_push_model_failed', { message: error.message });
-                return dream.residue;
-              }
-            },
-          });
-          if (selected.reason === 'duplicate') {
-            log('bark_duplicate_skipped', { kind: 'dream', attempts: selected.attempts });
-          }
-          if (selected.message) {
-            const result = await bark.send(selected.message);
-            if (result.sent) {
-              state = await updateState({
-                type: 'bark_sent',
-                source: 'bark',
-                details: { barkSent: true, kind: 'dream' },
-                at: now,
-              }, (latest) => recordBark(latest, now, { kind: 'dream', message: selected.message }));
-              barkSent = true;
-              log('bark_sent', { kind: 'dream', revision: state.revision });
-              // 回流补全：他把梦余韵分享给她，也是一次向她的表达 → 回流进思维池（同自主念头）。
-              if (config.reflux.enabled) {
-                const expressed = topDrives(state)[0];
-                if (expressed) {
-                  state = await updateState({
-                    type: 'output_reflux',
-                    source: 'reflux',
-                    details: { kind: 'dream', drive: expressed.key },
-                    at: now,
-                  }, (latest) => applyOutputReflux(latest, expressed.key, selected.message, now, config.reflux.amount).state);
-                  log('output_reflux', { kind: 'dream', drive: expressed.key, revision: state.revision });
-                }
-              }
-            }
-          }
-        } catch (error) { log('bark_failed', { kind: 'dream', message: error.message }); }
+      // 3.3：梦做完不在凌晨推。攒着，到她常来的点前后再推"昨晚梦到……"（见下面 pendingDreamPush）。
+      if (!config.shadowMode && config.bark.enabled) {
+        state = await updateState({ type: 'dream_push_pending', source: 'dream', details: { dreamId: dream.id }, at: now },
+          (latest) => ({ ...latest, pendingDreamPush: { dreamId: dream.id, createdAt: now.toISOString() } }));
+      }
+    }
+
+    // 早上推梦：她常来的点前后（期待 ≥0.3）或 9 点之后；14 小时没推出去就作废；仍受 Bark 总闸和 3 小时空档。
+    if (!config.shadowMode && config.bark.enabled && state.pendingDreamPush) {
+      const pending = state.pendingDreamPush;
+      const ageH = (now.getTime() - Date.parse(pending.createdAt)) / 3_600_000;
+      const { hour } = localDayAndHour(now, config.settle.timeZone);
+      const dream = state.recentDreams.find((d) => d.id === pending.dreamId);
+      const anticipation = computeAnticipation(state, now, { timeZone: config.settle.timeZone });
+      const morning = hour >= 8 && (anticipation >= 0.3 || hour >= 9);
+      if (!dream || ageH > 14) {
+        state = await updateState({ type: 'dream_push_dropped', source: 'dream', details: { dreamId: pending.dreamId, ageH: Number(ageH.toFixed(1)) }, at: now },
+          (latest) => ({ ...latest, pendingDreamPush: null }));
+        log('dream_push_dropped', { dreamId: pending.dreamId, ageH: Number(ageH.toFixed(1)) });
+      } else if (morning && dreamContactIsIdle && barkAllowed(state, now, config.bark.minIntervalHours, config.bark.maxPerDay, 'dream')) {
+        state = await sendDreamPush(state, dream, now);
+        state = await updateState({ type: 'dream_push_sent', source: 'dream', details: { dreamId: dream.id }, at: now },
+          (latest) => ({ ...latest, pendingDreamPush: null }));
       }
     }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { applyConversationEvent, newState, settleState } from '../src/engine.js';
+import { applyConversationEvent, applyDreamWake, newState, recordDream, settleState } from '../src/engine.js';
 import { EMOTION_BASELINE, emotionLabel, emotionTarget } from '../src/emotion.js';
 import { buildContextEnvelope } from '../src/context-envelope.js';
 import { buildDashboardSnapshot } from '../src/dashboard-projection.js';
@@ -124,4 +124,20 @@ test('grieve and anger decay toward zero with a 24h half-life instead of parking
   assert.ok(day.drives.anger < 0.15 && day.drives.anger > 0.07);
   const week = settleState(day, new Date(Date.parse(T0) + 8 * 24 * 3_600_000)).state;
   assert.ok(week.drives.grieve < 0.01);
+});
+
+test('waking after a dream applies its mood and drops its image into the thought pool once', () => {
+  let state = baseState();
+  state = settleState(state, new Date('2026-09-05T11:00:00.000Z')).state;      // 3h idle → sleeping
+  assert.equal(state.consciousness, 'sleeping');
+  state = recordDream(state, { id: 'd1', createdAt: '2026-09-05T12:00:00.000Z', dream: 'x', residue: '手心还热着', awareness: 'a', lucidity: 0.2, image: '海边那盏灯', mood: { valence: 0.2, arousal: 0.7 }, driveKey: 'possess', source: 'model' });
+  const before = state.emotion.valence;
+  const woke = applyConversationEvent(state, { eventId: 'w1', sessionId: 's' }, new Date('2026-09-05T13:00:00.000Z')).state;
+  assert.ok(woke.emotion.valence < before);
+  assert.equal(woke.emotion.lastCause, 'dream');
+  assert.equal(woke.thoughtPool.flash.at(-1).text, '海边那盏灯');
+  assert.equal(woke.thoughtPool.flash.at(-1).key, 'possess');
+  assert.equal(woke.recentDreams.at(-1).wakeApplied, true);
+  const again = applyDreamWake(structuredClone(woke), woke.recentDreams.at(-1), new Date());
+  assert.equal(again.thoughtPool.flash.length, woke.thoughtPool.flash.length + 1);   // 直接调会再加；醒来路径靠 wakeApplied 挡
 });

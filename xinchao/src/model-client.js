@@ -11,20 +11,31 @@ export class ModelClient {
     );
   }
 
-  async generateDream({ state, material, topDrives }) {
+  async generateDream({ state, material, farMaterial = '', topDrives, avoid = [], emotion = null, sleepHours = null }) {
     if (!this.config.enabled || !this.config.apiKey) return this.fallback(topDrives);
     const memory = String(material ?? '').slice(0, this.config.maxInputChars);
+    const far = String(farMaterial ?? '').slice(0, 1500);
+    const depth = sleepHours == null ? '' : (sleepHours < 2.5
+      ? '这是入睡不久的浅梦：短、碎、贴着白天的事，像半睡半醒时的画面。'
+      : '这是后半夜的深梦：可以走得远、跳得开，把远期那件小事和近期的东西缝在一起；清醒度可以高一点。');
     const prompt = [
       `你为 ${this.agentName} 生成一次睡眠中的梦境结算。`,
       '如果启用了外部记忆 MCP，它只是记忆材料来源；调用记忆服务本身不代表醒来。',
       '保持人物连续性；梦可以跳跃、含混、有身体感和欲望，不把梦误写成现实。',
       '不要过滤、替换或回避驱动力本身。不要把调用外部记忆服务描述成醒来。',
       'lucidity 表示梦中意识到自己正在做梦、能够观察或控制梦境的程度，0 为完全沉浸，1 为高度清醒梦。',
-      '只输出 JSON：{"dream":"...","residue":"...","awareness":"...","lucidity":0.0}。',
+      'residue 是醒来后身体和心里剩下的东西，一到两句；不要每次都写"残留着触感""胸口闷"，换着来。',
+      'image 是这场梦里最强的一个意象，不超过 12 个字，白天会当念头冒出来。',
+      'mood 是醒来时这场梦留下的心情：valence 0 难受…1 舒服，arousal 0 倦…1 亢奋。',
+      '只输出 JSON：{"dream":"...","residue":"...","awareness":"...","lucidity":0.0,"image":"...","mood":{"valence":0.5,"arousal":0.3}}。',
+      depth,
+      avoid.length ? `最近几场梦已经用过这些意象，这次别再用：${avoid.join('；')}` : '',
+      emotion ? `入睡时的心情：${emotion.label}（愉悦 ${emotion.valence}，唤醒 ${emotion.arousal}）` : '',
       `当前动态欲望：${JSON.stringify(topDrives)}`,
       `当前意识状态：${state.consciousness}`,
-      `近期记忆材料：${memory || '没有取得新的记忆材料'}`
-    ].join('\n');
+      `记忆正在消化的东西（近两天）：${memory || '没有取得新的记忆材料'}`,
+      far ? `远处的一件小事：${far}` : '',
+    ].filter(Boolean).join('\n');
 
     const body = {
       model: this.config.name,
@@ -52,6 +63,8 @@ export class ModelClient {
       residue: String(parsed.residue ?? '').slice(0, 1200),
       awareness: String(parsed.awareness ?? '').slice(0, 1200),
       lucidity: normalizedLucidity(parsed.lucidity),
+      image: String(parsed.image ?? '').replace(/\s+/g, ' ').trim().slice(0, 24) || null,
+      mood: normalizedMood(parsed.mood),
       source: 'model',
       model: this.config.name
     };
@@ -220,6 +233,12 @@ function defaultDreamPushPrompt(agentName, notificationRecipient) {
     '只避免复用近期通知的相同措辞、句式和具体表达。',
     '只输出推送文案，不要解释、前缀或标签。'
   ].join('\n');
+}
+
+function normalizedMood(value) {
+  const v = Number(value?.valence); const a = Number(value?.arousal);
+  if (!Number.isFinite(v) || !Number.isFinite(a)) return null;
+  return { valence: Math.max(0, Math.min(1, v)), arousal: Math.max(0, Math.min(1, a)) };
 }
 
 function parseJson(text) {

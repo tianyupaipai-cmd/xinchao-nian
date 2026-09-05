@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimensions.js';
 import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought } from './thought-pool.js';
+import { DRIVE_KEYS as ALL_DRIVE_KEYS } from './dimensions.js';
 import { tickPending } from './pending-queue.js';
 import { ensureAwareness } from './awareness.js';
 import { ensureSelfSignals } from './self-signals.js';
@@ -213,6 +214,23 @@ function applySessionOverlay(state, event, now) {
     .slice(0, 64);
   state.sessionOverlays = Object.fromEntries(entries);
   return { sessionId, created };
+}
+
+// 梦醒的后果：心情脉冲（离 0.5 的偏差折半，最多 ±0.2）+ 闪念（挂在做梦时最强的那一维）。
+export function applyDreamWake(state, dream, now = new Date()) {
+  const mood = dream?.mood;
+  if (mood && Number.isFinite(Number(mood.valence)) && Number.isFinite(Number(mood.arousal))) {
+    const dv = clamp((Number(mood.valence) - 0.5) * 0.5, -0.2, 0.2);
+    const da = clamp((Number(mood.arousal) - 0.3) * 0.5, -0.2, 0.2);
+    applyEmotionImpulse(state, { valence: dv, arousal: da }, 'dream', now);
+  }
+  const text = String(dream?.image || dream?.residue || '').trim();
+  const key = ALL_DRIVE_KEYS.includes(dream?.driveKey) ? dream.driveKey : (topDrives(state, 1)[0]?.key ?? null);
+  if (text && key) {
+    state.thoughtPool ??= newThoughtPool();
+    addFlashThought(state.thoughtPool, key, text.slice(0, 80), 0.62, { ombreBucketId: dream.ombreBucketId ?? null, sourceOmbreBucketIds: dream.sourceOmbreBucketIds ?? [] });
+  }
+  return state;
 }
 
 export function newState(now = new Date()) {
@@ -496,6 +514,11 @@ export function applyConversationEvent(input, event = {}, now = new Date(), opti
       residue: belongsToThisSleep ? latest.residue : null,
       note: '外部记忆 MCP 只是记忆材料来源；调用记忆服务本身不代表醒来。',
     };
+    // 梦有后果（3.3）：醒来时按梦留下的心情打一次情绪脉冲，把梦里最强的意象塞进思绪池当闪念。
+    if (belongsToThisSleep && !latest.wakeApplied) {
+      applyDreamWake(state, latest, now);
+      latest.wakeApplied = true;
+    }
   }
 
   const interaction = type && !eventId

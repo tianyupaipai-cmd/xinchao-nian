@@ -1,5 +1,8 @@
 import { SYSTEM_VERSION } from './version.js';
 
+// 梦不吃技术：这些域的记忆不进梦的原料（机房梦就是这么来的）
+const DREAM_EXCLUDE_DOMAINS = new Set(['技术', '数字', '编程', '事务']);
+
 export class OmbreClient {
   constructor(config) {
     this.config = config;
@@ -122,6 +125,43 @@ export class OmbreClient {
       max_tokens: Math.max(200, Math.min(600, Number(this.config.breathMaxTokens) || 400))
     });
     return materialWithRefs(extractText(result), 4000);
+  }
+
+  // 梦的原料（3.3）：OB 的 dream 是"最近 N 小时有变动的记忆全量"——记忆正在被消化的东西。
+  // 按桶拆开，去掉技术/事务类，保留主题、情感坐标和正文，封顶 maxChars。
+  async digestMaterial(windowHours = 48, { maxChars = 5000, maxBuckets = 8, exclude = DREAM_EXCLUDE_DOMAINS } = {}) {
+    const result = await this.call('dream', { window_hours: windowHours }, 30000);
+    const text = extractText(result);
+    const blocks = text.split(/\n---\n/).map((b) => b.trim()).filter((b) => /^\[/.test(b));
+    const picked = [];
+    for (const block of blocks) {
+      const head = block.split('\n')[0];
+      const domains = ((head.match(/主题[:：]\s*([^\s]+)/) || [])[1] || '').split(/[,，]/).filter(Boolean);
+      if (domains.some((d) => exclude.has(d))) continue;
+      const id = (block.match(/^ID:\s*([a-f0-9]+)/m) || [])[1] || null;
+      const va = head.match(/V(-?[\d.]+)\/A(-?[\d.]+)/);
+      const body = block.split('\n').slice(1).filter((l) => !/^ID:|^👣|^↳/.test(l)).join('\n').trim();
+      if (!body) continue;
+      picked.push({ id, domains, valence: va ? Number(va[1]) : null, arousal: va ? Number(va[2]) : null, text: body.slice(0, 900) });
+      if (picked.length >= maxBuckets) break;
+    }
+    let out = '';
+    for (const item of picked) {
+      const line = `[domain:${item.domains.join(',')}]${item.valence != null ? ` [情感:V${item.valence}/A${item.arousal}]` : ''}\n${item.text}\n\n`;
+      if (out.length + line.length > maxChars) break;
+      out += line;
+    }
+    return { text: out.trim(), bucketIds: picked.map((p) => p.id).filter(Boolean), domains: [...new Set(picked.flatMap((p) => p.domains))], total: blocks.length, kept: picked.length };
+  }
+
+  // 一条远期的小事：让梦有可以跳跃的另一头。30 天以前，只要一条。
+  async farMaterial(now = new Date()) {
+    const dateTo = new Date(now.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+    const result = await this.call('breath', {
+      query: '很久以前的一件具体的小事，有画面、有身体感；不要系统配置或技术信息',
+      max_results: 1, max_tokens: 400, date_to: dateTo,
+    });
+    return materialWithRefs(extractText(result), 1500);
   }
 
   async recentContinuityMaterial(maxTokens = this.config.breathMaxTokens, emotion = null) {
