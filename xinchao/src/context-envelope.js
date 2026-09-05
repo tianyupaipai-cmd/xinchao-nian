@@ -395,7 +395,7 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
   const counts = {};
   if (state.consciousness === 'sleeping') lines.push('睡着（她来了才算醒）');
-  else if (state.pendingAwareness) lines.push('刚醒');
+  else if (state.pendingAwareness && now.getTime() - Date.parse(state.pendingAwareness.createdAt ?? '') < 2 * 3_600_000) lines.push('刚醒');   // 醒来两小时内才算刚醒
 
   const drives = topDrives(state, 3).filter((d) => Number(d.value) >= 0.25);
   if (drives.length) lines.push(`驱力：${drives.map((d) => `${DRIVE_SHORT[d.key] ?? d.label}（${DRIVE_LEVEL(Number(d.value))}）`).join('、')}`);
