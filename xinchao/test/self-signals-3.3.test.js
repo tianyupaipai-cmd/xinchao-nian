@@ -101,3 +101,13 @@ test('a drive parked at its ceiling is a flat line, not a surge: no drive_peak',
   r = detectSelfSignals(r.state, at(6));
   assert.equal(r.signals.filter((s) => s.kind === 'drive_peak').length, 0);
 });
+
+test('a promoted obsession is announced once', () => {
+  let state = baseState();
+  state.thoughtPool.obsessions.push({ key: 'possess', text: '她说的那句门是可以拉开的', intensity: 0.7, feedbacks: 0 });
+  let r = detectSelfSignals(state, at(0));
+  const ob = r.signals.find((s) => s.kind === 'obsession');
+  assert.ok(ob);
+  assert.match(ob.text, /门是可以拉开的/);
+  assert.equal(detectSelfSignals(r.state, at(1)).signals.filter((s) => s.kind === 'obsession').length, 0);
+});

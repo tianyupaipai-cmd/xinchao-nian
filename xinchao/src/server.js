@@ -4,7 +4,7 @@ import { loadConfig, validateConfig } from './config.js';
 import { emotionCoords, emotionSummary, stampEmotionArgs } from './emotion.js';
 import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
 import { detectSelfSignals } from './self-signals.js';
-import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour } from './engine.js';
+import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour, applySurfacedThought, surfacedDriveKey } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
 import { selectUniqueBark } from './bark-dedupe.js';
 import { StateStore } from './state-store.js';
@@ -473,7 +473,7 @@ async function runCycle() {
         at: now,
       }, (latest) => scheduleDaytimeEmergence(latest, now, config.daytime.minIntervalHours, config.daytime.maxIntervalHours));
       log('daytime_emergence_scheduled', { nextAt: state.nextDaytimeEmergenceAt, revision: state.revision });
-    } else if (!config.shadowMode && config.daytime.enabled && config.ombre.readEnabled && config.bark.enabled && daytimeEmergenceAllowed(state, now, config.daytime)) {
+    } else if (!config.shadowMode && config.daytime.enabled && config.ombre.readEnabled && (!config.daytime.bark || config.bark.enabled) && daytimeEmergenceAllowed(state, now, config.daytime)) {
       let selected = { message: '', candidate: { source: 'none' }, reason: 'empty', attempts: 1 };
       try {
         const recalled = await ombre.daytimeMaterialWithRefs(topDrives(state), emotionForOmbre(state));
@@ -490,7 +490,26 @@ async function runCycle() {
             log('memory_resonance', { kind: 'daytime_emergence', domains: domains.length, revision: state.revision });
           }
         }
+        // 浮现 → 念头池：不代笔，不推她。取这次浮现的第一句当闪念，挂在最亲和的那一维上。
         if (material.trim()) {
+          const domains = parseSurfacedDomains(material);
+          const key = surfacedDriveKey(domains, state);
+          const firstLine = material.split('\n').map((l) => l.trim()).find((l) => l && !/^\[/.test(l)) || '';
+          if (key && firstLine) {
+            state = await updateState({
+              type: 'surfaced_thought',
+              source: 'daytime',
+              details: { drive: key, domains: domains.slice(0, 6).join(',') },
+              at: now,
+            }, (latest) => applySurfacedThought(latest, key, firstLine, now, 0.45, { ombreBucketId: recalled.bucketIds[0] ?? null, sourceOmbreBucketIds: recalled.bucketIds }).state);
+            log('surfaced_thought', { drive: key, domains: domains.length, revision: state.revision });
+          }
+          if (!config.daytime.bark) {
+            state = await updateState({ type: 'daytime_emergence_noted', source: 'daytime', at: now },
+              (latest) => recordDaytimeEmergence(latest, firstLine, now, config.daytime.timeZone, { silent: true }));
+          }
+        }
+        if (material.trim() && config.daytime.bark) {
           selected = await selectUniqueBark({
             state,
             onRejected: ({ attempt, similarity }) => log('bark_duplicate_rejected', { kind: 'daytime_emergence', attempt, similarity }),
@@ -541,7 +560,7 @@ async function runCycle() {
         } catch (error) {
           log('bark_failed', { kind: 'daytime_emergence', message: error.message });
         }
-      } else {
+      } else if (config.daytime.bark) {
         log('daytime_emergence_skipped', { reason: selected.reason === 'duplicate' ? 'duplicate' : 'no_pushworthy_material' });
       }
       state = await updateState({

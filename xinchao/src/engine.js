@@ -233,6 +233,32 @@ export function applyDreamWake(state, dream, now = new Date()) {
   return state;
 }
 
+// 浮现 → 念头池（3.3）：白天捞上来的记忆不再代笔推送，而是在思绪池里落一条闪念。
+// 同一维度反复浮现（在闪念散掉前再被强化）才升成持续念头——"老想起一件事"就是这么来的。
+// 机制与输出回流共用 reinforceThought，收敛靠池子自己。
+export function applySurfacedThought(input, driveKey, text, now = new Date(), amount = 0.45, metadata = {}) {
+  const state = ensureStateShape(structuredClone(input));
+  if (!DRIVE_KEYS.includes(driveKey) || !String(text ?? '').trim()) return { state, changed: false };
+  state.thoughtPool ??= newThoughtPool();
+  const result = reinforceThought(state.thoughtPool, driveKey, String(text).trim().slice(0, 80), amount, metadata);
+  state.revision += 1;
+  return { state, changed: true, ...result };
+}
+
+// 浮现的记忆落到哪一维：按 domain 亲和度取最强的一维；没有就用当前最强驱力。
+export function surfacedDriveKey(domains = [], state = null) {
+  let best = null;
+  for (const raw of domains) {
+    const map = DOMAIN_AFFINITY[String(raw ?? '').trim()];
+    if (!map) continue;
+    for (const [key, value] of Object.entries(map)) {
+      if (!DRIVE_KEYS.includes(key)) continue;
+      if (!best || value > best.value) best = { key, value };
+    }
+  }
+  return best?.key ?? (state ? (topDrives(state, 1)[0]?.key ?? null) : null);
+}
+
 export function newState(now = new Date()) {
   const at = iso(now);
   return {
@@ -910,11 +936,11 @@ export function scheduleDaytimeEmergence(input, now = new Date(), minHours = 2, 
   return state;
 }
 
-export function recordDaytimeEmergence(input, message, now = new Date(), timeZone = 'Asia/Shanghai') {
+export function recordDaytimeEmergence(input, message, now = new Date(), timeZone = 'Asia/Shanghai', { silent = false } = {}) {
   const state = structuredClone(input);
   const at = iso(now);
   const { day } = localDayAndHour(now, timeZone);
-  appendRecentBark(state, at, 'daytime_emergence', message);
+  if (!silent) appendRecentBark(state, at, 'daytime_emergence', message);
   state.lastDaytimeEmergenceAt = at;
   state.lastDaytimeMessage = message;
   state.daytimeEmergenceUsage ??= {};

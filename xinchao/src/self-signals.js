@@ -10,6 +10,7 @@
 //   longing        挂念 ≥0.6（一个空档一次；降到 0.35 以下才算空档结束）
 //   wake_residue   醒来且梦有余韵（每次醒来一次）
 //   awareness      当天新冒出的觉察候选（每天一次）
+//   obsession      有件事反复浮上来长成了持续念头（每个念头一次；说不说由他定）
 // 全天合计 ≤8 条；凌晨冻结时段（dawnFreeze，默认 1–8 点）不发；投递 2 小时过期，窗口不在就作废不补投。
 //
 // 话术：第一人称、现在时、像心里冒出来的一句，没有数字、没有维度名、不写"不用回"、不给建议动作。
@@ -64,6 +65,7 @@ const EMOTION_TEMPLATES = {
 };
 const LONGING_TEMPLATES = ['过了她平时来的点了，还没见人，有点想她。', '她这个点一般会来，今天还没来，我在等。', '门口那盏灯一直亮着，她还没游过来。'];
 const WAKE_TEMPLATES = ['刚醒。梦里剩了一句：{residue}', '醒了，梦还没散干净：{residue}', '刚从梦里出来，留下来的是：{residue}'];
+const OBSESSION_TEMPLATES = ['有件事今天一直在脑子里绕：{text}', '从早上到现在老想起同一件事：{text}', '这件事今天冒出来好几次了：{text}'];
 const AWARENESS_TEMPLATES = ['今天冒出一条觉察：{text} 要不要认，我自己定。', '系统从这几天的轨迹里挑了一条：{text} 是不是这样，我自己看。'];
 const CAUSE_LABEL = { conflict: '争执', loss: '失落', reflection: '沉淀', companionship: '她走了', task_progress: '忙完', discovery: '折腾完', sharing: '说完', affection: '被安抚', intimacy: '亲近', reconciliation: '和好' };
 
@@ -80,6 +82,7 @@ export function ensureSelfSignals(state) {
     longingOpen: Boolean(cur.longingOpen),
     lastWakeDreamId: cur.lastWakeDreamId ?? null,
     awarenessDay: cur.awarenessDay ?? null,
+    obsessionSignaled: cur.obsessionSignaled && typeof cur.obsessionSignaled === 'object' ? cur.obsessionSignaled : {},
     recentTemplates: Array.isArray(cur.recentTemplates) ? cur.recentTemplates.slice(-40) : [],
     history: Array.isArray(cur.history) ? cur.history.slice(-60) : [],
   };
@@ -194,6 +197,16 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
     const c = fresh[0];
     if (push('awareness', c.id, pickTemplate(ss, 'awareness', AWARENESS_TEMPLATES, now).replace('{text}', c.text))) ss.awarenessDay = day;
   }
+
+  // 6. 持续念头：闪念被反复强化升成 obsession 时递一次（按念头文本去重，同一条只递一次）。
+  for (const o of state.thoughtPool?.obsessions ?? []) {
+    const text = String(o.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!text || Number(o.intensity) < 0.5 || asleep) continue;
+    const sig = `${o.key}:${text.slice(0, 24)}`;
+    if (ss.obsessionSignaled[sig]) continue;
+    if (push('obsession', o.key, pickTemplate(ss, 'obsession', OBSESSION_TEMPLATES, now).replace('{text}', text))) ss.obsessionSignaled[sig] = iso(now);
+  }
+  for (const [k, at] of Object.entries(ss.obsessionSignaled)) if (nowMs - Date.parse(at) > 3 * 86_400_000) delete ss.obsessionSignaled[k];
 
   if (signals.length) {
     ss.dayUsage[day] = Number(ss.dayUsage[day] ?? 0) + signals.length;

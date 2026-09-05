@@ -152,7 +152,9 @@ export function loadConfig() {
       endHour: number('DAYTIME_END_HOUR', 23, 1, 24),
       minIntervalHours: number('DAYTIME_MIN_INTERVAL_HOURS', 2, 0.25, 24),
       maxIntervalHours: number('DAYTIME_MAX_INTERVAL_HOURS', 3, 0.25, 24),
-      maxPerDay: number('DAYTIME_MAX_PER_DAY', 7, 1, 24)
+      maxPerDay: number('DAYTIME_MAX_PER_DAY', 7, 1, 24),
+      // 3.3：默认不再让模型代笔 Bark 给她；浮现的记忆进念头池，反复浮现长成持续念头后经自身信号递给 AI，说不说由 AI 自己定
+      bark: bool('DAYTIME_BARK_ENABLED', false),
     },
     // 输出回流：他说出口的自主表达回过头在思维池里留痕。默认开——闭环的第一块。
     reflux: {
