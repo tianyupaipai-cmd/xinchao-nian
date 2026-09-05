@@ -18,7 +18,7 @@ test('old schema state upgrades additively without resetting drives', () => {
   delete old.satisfactionPlateaus;
   old.drives.possess = 0.63;
   const result = settleState(old, new Date('2026-08-19T08:00:00.000Z'));
-  assert.equal(result.state.schemaVersion, 8);
+  assert.equal(result.state.schemaVersion, 9);
   assert.equal(result.state.drives.possess, 0.63);
   assert.deepEqual(result.state.pending, []);
   assert.deepEqual(result.state.satisfactionPlateaus, {});

@@ -1,5 +1,6 @@
 import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
 import { buildConnectionDiagnostics } from './connection-diagnostics.js';
+import { emotionSummary } from './emotion.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, Number(value) || 0));
 
@@ -160,6 +161,8 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
     },
     drives,
     topDrives,
+    // 情绪层（3.3）：此刻的心情，和驱力分开。成因是互动类型名，不含正文。
+    emotion: emotionSummary(state),
     personality: projectedPersonality(personalityCore, config),
     thoughts: projectedThoughts(state, Boolean(config.dashboard?.includePrivateText)),
     dreams: projectedDreams(

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimensions.js';
 import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought } from './thought-pool.js';
 import { tickPending } from './pending-queue.js';
+import { INTERACTION_EMOTION, applyEmotionImpulse, blendEmotionTowardTone, ensureEmotion, newEmotion, settleEmotion } from './emotion.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 // 驱力被顶到自己的静息天花板之上后，每小时松弛回来的比例（越大回落越快）。
@@ -66,7 +67,8 @@ function ensureStateShape(state) {
   state.arrivalHistogram = Array.isArray(state.arrivalHistogram) && state.arrivalHistogram.length === 24
     ? state.arrivalHistogram.map((n) => Number(n) || 0)
     : Array.from({ length: 24 }, () => 0);
-  state.schemaVersion = Math.max(8, Number(state.schemaVersion) || 0);
+  ensureEmotion(state);
+  state.schemaVersion = Math.max(9, Number(state.schemaVersion) || 0);
   return state;
 }
 
@@ -212,7 +214,7 @@ function applySessionOverlay(state, event, now) {
 export function newState(now = new Date()) {
   const at = iso(now);
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     revision: 0,
     consciousness: 'awake',
     lastConversationAt: at,
@@ -242,6 +244,7 @@ export function newState(now = new Date()) {
     recentConversationEvents: [],
     interactionUsage: {},
     arrivalHistogram: Array.from({ length: 24 }, () => 0),
+    emotion: newEmotion(now),
   };
 }
 
@@ -389,6 +392,9 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
     state.drives[key] = Number(next.toFixed(4));
   }
 
+  // 情绪层：只做指数回落（睡着回落更快），回落目标被 grieve/anger 拽着。没有增长项，不自激。
+  if (settleEmotion(state, elapsedHours, { sleeping: state.consciousness === 'sleeping', drives: state.drives, now }).changed) changed = true;
+
   // Tick thought pool
   state.thoughtPool ??= newThoughtPool();
   const feedbacks = tickThoughtPool(state.thoughtPool);
@@ -481,6 +487,11 @@ export function applyConversationEvent(input, event = {}, now = new Date(), opti
       affectedDrives: [],
     }
     : applyInteractionOutcome(state, type, now, options);
+
+  // 情绪层：互动事件打一次脉冲（和驱力效果同一道日限门），会话 tone 把情绪往落点拉一小段。
+  if (interaction.applied && INTERACTION_EMOTION[type]) applyEmotionImpulse(state, INTERACTION_EMOTION[type], type, now);
+  const overlayTone = state.sessionOverlays?.[session.sessionId]?.tone;
+  if (overlayTone && overlayTone !== 'neutral') blendEmotionTowardTone(state, overlayTone, now);
 
   // Additive deltas (backward-compatible)
   for (const [key, delta] of Object.entries(event.driveDeltas ?? {})) {

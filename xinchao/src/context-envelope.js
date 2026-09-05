@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives } from './engine.js';
+import { emotionSummary, renderEmotion } from './emotion.js';
 import { renderHandoffNotes } from './handoff-notes.js';
 import { renderPending, selectForDelivery } from './pending-queue.js';
 
@@ -89,6 +90,7 @@ function dynamicSection(state, sessionId, now, timeZone) {
     longing: computeLonging(state, now, { timeZone }),
     thoughts: thoughtSignals(state),
     session: sessionOverlay(state, sessionId, now),
+    emotion: emotionSummary(state),
   };
 }
 
@@ -115,6 +117,7 @@ function renderDynamic(value) {
   const parts = [
     `意识=${value.consciousness}`,
     `疲劳=${value.fatigue.toFixed(3)}`,
+    renderEmotion(value.emotion),
     drives ? `当前驱力：${drives}` : '',
   ].filter(Boolean);
   // 挂念优先于期待：她久没来时，说"想她了"而不是"她快来了"，两者不同时出现。
