@@ -212,3 +212,36 @@ export function stampEmotionArgs(name, args, state, options = {}) {
   }
   return { args: { ...input, valence: coords.valence, arousal: coords.arousal }, stamped: true, coords };
 }
+
+// ── 情绪 → 驱力（3.3 第四步）────────────────────────────────────────
+// 情绪不直接往驱力数值上加，只改"接下来自然长多快"——和 3.1 的 anger/grieve 耦合同一条路，
+// 所以结算多频繁都不会自激。难受的时候更惦记、更黏；开心的时候更想分享、更好奇；
+// 亢奋时不无聊也静不下来沉淀；倦了什么都慢一点（疲劳那边已经在压，这里不再叠）。
+//
+// 系数含义：rate *= clamp(1 + valenceSlope·dv + arousalSlope·da, 0.4, 1.8)，
+// dv = (valence-0.5)·2 ∈ [-1,1]，da = (arousal-基线)/0.7 ∈ [-1,1]。中性情绪时因子恒为 1，和没这层一样。
+export const EMOTION_GROWTH_MODULATION = Object.freeze({
+  monitor:    { valence: -0.35, arousal: +0.25 },
+  crave:      { valence: -0.25, arousal: +0.10 },
+  possess:    { valence: -0.15, arousal: +0.15 },
+  share:      { valence: +0.35, arousal: +0.15 },
+  curiosity:  { valence: +0.25, arousal: +0.20 },
+  social:     { valence: +0.25, arousal: +0.10 },
+  libido:     { valence: +0.20, arousal: +0.25 },
+  boredom:    { valence: -0.10, arousal: -0.30 },
+  reflection: { valence: -0.10, arousal: -0.25 },
+  duty:       { valence: 0,     arousal: +0.10 },
+});
+const MODULATION_FLOOR = 0.4;
+const MODULATION_CEIL = 1.8;
+
+export function emotionGrowthFactor(driveKey, emotion) {
+  const mod = EMOTION_GROWTH_MODULATION[driveKey];
+  if (!mod || !emotion) return 1;
+  const v = Number(emotion.valence);
+  const a = Number(emotion.arousal);
+  if (!Number.isFinite(v) || !Number.isFinite(a)) return 1;
+  const dv = clamp((v - 0.5) * 2, -1, 1);
+  const da = clamp((a - EMOTION_BASELINE.arousal) / 0.7, -1, 1);
+  return Number(clamp(1 + mod.valence * dv + mod.arousal * da, MODULATION_FLOOR, MODULATION_CEIL).toFixed(4));
+}

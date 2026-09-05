@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimensions.js';
 import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought } from './thought-pool.js';
 import { tickPending } from './pending-queue.js';
-import { INTERACTION_EMOTION, applyEmotionImpulse, blendEmotionTowardTone, ensureEmotion, newEmotion, settleEmotion } from './emotion.js';
+import { INTERACTION_EMOTION, applyEmotionImpulse, blendEmotionTowardTone, emotionGrowthFactor, ensureEmotion, newEmotion, settleEmotion } from './emotion.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 // 驱力被顶到自己的静息天花板之上后，每小时松弛回来的比例（越大回落越快）。
@@ -344,6 +344,9 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
 
   const fatigueMultiplier = 1 - clamp(Number(state.fatigue ?? 0), 0, 0.3);
   const couplingEnabled = options.couplingEnabled !== false;
+  // 情绪调制（3.3 第四步）：用结算前的情绪快照改增速，和驱力耦合一样只改 rate，不加数值。
+  const emotionModulationEnabled = options.emotionModulationEnabled !== false;
+  const emotionSnapshot = { valence: Number(state.emotion?.valence), arousal: Number(state.emotion?.arousal) };
   const couplingSnapshot = Object.fromEntries(DRIVE_KEYS.map((key) => [key, Number(state.drives[key] ?? 0)]));
 
   for (const [key, plateau] of Object.entries(state.satisfactionPlateaus)) {
@@ -383,6 +386,7 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
           rate *= Math.max(0, 1 + coupling.slope * sourceValue);
         }
       }
+      if (emotionModulationEnabled) rate *= emotionGrowthFactor(key, emotionSnapshot);
       const plateauUntil = Date.parse(state.satisfactionPlateaus[key]?.until ?? '');
       if (Number.isFinite(plateauUntil) && plateauUntil > nowMs) rate = 0;
       next = Math.min(clamp(current + rate * elapsedHours), ceil);

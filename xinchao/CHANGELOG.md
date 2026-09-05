@@ -23,6 +23,14 @@
   （偏差 ≥ 0.15）时才盖章，平静时留给 OB 按内容打标。`grow` 没有情绪参数，不碰。
 - 新开关 `OMBRE_EMOTION_STAMP`（默认开）。
 
+### 情绪 → 驱力
+
+- 情绪层调制 12 维的自然增速：难受时 monitor / crave / possess 长得快、share 慢；开心时 share / curiosity / social / libido 快；
+  亢奋时 boredom / reflection 慢。因子 = clamp(1 + 愉悦斜率·dv + 唤醒斜率·da, 0.4, 1.8)，中性情绪恒为 1。
+- 与 3.1 的 anger/grieve 耦合走同一条路：只改"接下来长多快"，不往数值上加，也不突破各维静息天花板；
+  情绪自身没有增长项，两层之间没有正反馈环。
+- 新开关 `EMOTION_MODULATION_ENABLED`（默认开）。
+
 ## 3.2.0 — 2026-08-21
 
 ### 行为锚点（Behavior Anchors）

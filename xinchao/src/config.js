@@ -136,6 +136,8 @@ export function loadConfig() {
         ? number('SATIETY_HOURS', 2, 0, 24)
         : number('SATISFACTION_PLATEAU_HOURS', 2, 0, 24),
       couplingEnabled: bool('DRIVE_COUPLING_ENABLED', true),
+      // 3.3：情绪层调制驱力自然增速（难受更惦记、开心更想分享）。只改增速不加数值。
+      emotionModulationEnabled: bool('EMOTION_MODULATION_ENABLED', true),
     },
     daytime: {
       enabled: bool('DAYTIME_EMERGENCE_ENABLED', false),
