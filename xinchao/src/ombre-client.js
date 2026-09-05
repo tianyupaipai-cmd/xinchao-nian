@@ -157,9 +157,10 @@ export class OmbreClient {
   // 一条远期的小事：让梦有可以跳跃的另一头。30 天以前，只要一条。
   async farMaterial(now = new Date()) {
     const dateTo = new Date(now.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
-    const result = await this.call('breath', {
+    // OB 3.6：日期过滤只在 breath_advanced 上（公开 breath 不收 date_to）
+    const result = await this.call('breath_advanced', {
       query: '很久以前的一件具体的小事，有画面、有身体感；不要系统配置或技术信息',
-      max_results: 1, max_tokens: 400, date_to: dateTo,
+      max_results: 1, max_tokens: 400, date_to: dateTo, with_ids: true,
     });
     return materialWithRefs(extractText(result), 1500);
   }
