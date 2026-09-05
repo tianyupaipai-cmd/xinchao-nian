@@ -17,8 +17,10 @@ const ev = (type, id) => ({ eventId: id, interactionType: type, sessionId: 's' }
 
 test('drive peak fires once after 2h above 0.8, once per drive per day, and carries a now-line', () => {
   let state = baseState();
-  state.drives.possess = 0.9;
-  let r = detectSelfSignals(state, at(0));
+  state.drives.possess = 0.3;
+  let r = detectSelfSignals(state, at(-1));                // 先见过它在低位
+  state = r.state; state.drives.possess = 0.9;
+  r = detectSelfSignals(state, at(0));
   assert.equal(r.signals.length, 0);                       // 刚过线，起点记下
   r = detectSelfSignals(r.state, at(1));
   assert.equal(r.signals.length, 0);
@@ -89,4 +91,13 @@ test('awareness candidates created today are announced once; templates rotate', 
   assert.match(aw.text, /觉察/);
   assert.equal(detectSelfSignals(r.state, at(1)).signals.filter((s) => s.kind === 'awareness').length, 0);
   assert.match(renderNowLine(state, at(0)), /^此刻：/);
+});
+
+test('a drive parked at its ceiling is a flat line, not a surge: no drive_peak', () => {
+  let state = baseState();
+  state.drives.possess = 0.9;
+  let r = detectSelfSignals(state, at(0));
+  r = detectSelfSignals(r.state, at(3));
+  r = detectSelfSignals(r.state, at(6));
+  assert.equal(r.signals.filter((s) => s.kind === 'drive_peak').length, 0);
 });

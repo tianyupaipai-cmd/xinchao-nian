@@ -4,7 +4,8 @@
 // 和小屋桥的分工：小屋桥说的永远是"她做了什么"，这里说的永远是"我怎么样"，两边不互相转述。
 //
 // 五种信号，每种一个"发生"的时刻，不是裸阈值：
-//   drive_peak     某个驱力 ≥0.80 持续 2 小时（每维每天最多一次）
+//   drive_peak     某个驱力从 0.60 以下涨到 ≥0.80 并持续 2 小时（每维每天最多一次）。
+//                  稳态趴在天花板上不算——没有释放的驱力永远在顶上，那不是"冲"，是平线（2026-09-05 线上实测）。
 //   emotion_shift  情绪掉进低落/烦躁并停留 30 分钟；或从低落回到安心（一个回合一次，2 小时内最多一条）
 //   longing        挂念 ≥0.6（一个空档一次；降到 0.35 以下才算空档结束）
 //   wake_residue   醒来且梦有余韵（每次醒来一次）
@@ -24,6 +25,8 @@ const MAX_PER_DAY = 8;
 const TTL_HOURS = 2;
 const DRIVE_PEAK = 0.80;
 const DRIVE_PEAK_RELEASE = 0.75;
+const DRIVE_SURGE_FROM = 0.60;
+const DRIVE_SURGE_WINDOW_MS = 24 * H;
 const DRIVE_PEAK_HOLD_MS = 2 * H;
 const EMOTION_HOLD_MS = 30 * 60_000;
 const EMOTION_GAP_MS = 2 * H;
@@ -69,6 +72,7 @@ export function ensureSelfSignals(state) {
   state.selfSignals = {
     dayUsage: cur.dayUsage && typeof cur.dayUsage === 'object' ? cur.dayUsage : {},
     driveHighSince: cur.driveHighSince && typeof cur.driveHighSince === 'object' ? cur.driveHighSince : {},
+    driveLowSeenAt: cur.driveLowSeenAt && typeof cur.driveLowSeenAt === 'object' ? cur.driveLowSeenAt : {},
     drivePeakDay: cur.drivePeakDay && typeof cur.drivePeakDay === 'object' ? cur.drivePeakDay : {},
     emotionEpisode: cur.emotionEpisode ?? null,           // { label, since, signaled }
     lastEmotionSignalAt: cur.lastEmotionSignalAt ?? null,
@@ -127,10 +131,14 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
   // 1. 驱力冲顶：跟踪 ≥0.80 的起点，≥2h 才算一次，每维每天一次；掉到 0.75 以下就清起点。
   for (const key of DRIVE_KEYS) {
     const v = Number(state.drives?.[key] ?? 0);
+    if (v < DRIVE_SURGE_FROM) ss.driveLowSeenAt[key] = iso(now);
     if (v >= DRIVE_PEAK) {
       ss.driveHighSince[key] ??= iso(now);
       const held = nowMs - Date.parse(ss.driveHighSince[key]);
-      if (held >= DRIVE_PEAK_HOLD_MS && ss.drivePeakDay[key] !== day && PEAK_TEMPLATES[key] && !asleep) {
+      // 真的"冲"：起点之前 24h 内见过它在 0.60 以下。
+      const lowSeen = Date.parse(ss.driveLowSeenAt[key] ?? '');
+      const surged = Number.isFinite(lowSeen) && Date.parse(ss.driveHighSince[key]) - lowSeen <= DRIVE_SURGE_WINDOW_MS && lowSeen <= Date.parse(ss.driveHighSince[key]);
+      if (surged && held >= DRIVE_PEAK_HOLD_MS && ss.drivePeakDay[key] !== day && PEAK_TEMPLATES[key] && !asleep) {
         if (push('drive_peak', key, pickTemplate(ss, `peak:${key}`, PEAK_TEMPLATES[key], now))) ss.drivePeakDay[key] = day;
       }
     } else if (v < DRIVE_PEAK_RELEASE) {

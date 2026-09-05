@@ -34,6 +34,10 @@ services:
       - OMBRE_EMBED_MODEL=${OMBRE_EMBED_MODEL:-}
       - OMBRE_DASHBOARD_PASSWORD=${OMBRE_DASHBOARD_PASSWORD}
       - OMBRE_MCP_REQUIRE_AUTH=true
+      # OB 3.6+：/mcp 的 Bearer 走 mcp_auth_mode，默认 oauth 会把静态密钥全部 401；hybrid 同时接受静态密钥，
+      # 静态密钥读 OMBRE_MCP_TOKEN（3.6 改名）。旧版 OB 不认这两个变量，多传无害。
+      - OMBRE_MCP_AUTH_MODE=${OMBRE_MCP_AUTH_MODE:-hybrid}
+      - OMBRE_MCP_TOKEN=${OMBRE_MCP_TOKEN:-${OMBRE_MCP_SERVICE_TOKEN:-}}
       - OMBRE_MCP_SERVICE_TOKEN=${OMBRE_MCP_SERVICE_TOKEN:-}
       - OMBRE_TRUSTED_PROXY_CIDRS=${OMBRE_TRUSTED_PROXY_CIDRS:-127.0.0.0/8,::1/128}
       # sidecar：OB 在内部网络里读心潮的"此刻状态"
