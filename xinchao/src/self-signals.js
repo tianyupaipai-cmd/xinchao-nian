@@ -154,10 +154,14 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
     }
   } else {
     ss.emotionEpisode = null;
+    // 回到安心：递一次“缓过来了”。2h 间隔没到就留着下次再说；但低落信号过去 6h 还没说，就不说了（迟到的“缓过来了”是假话）。
+    if (ss.lowEpisodeOpen && ss.lastEmotionSignalAt && nowMs - Date.parse(ss.lastEmotionSignalAt) > 6 * H) ss.lowEpisodeOpen = false;
     if (ss.lowEpisodeOpen && HIGH_LABELS.has(label) && !asleep) {
       const gapOk = !ss.lastEmotionSignalAt || nowMs - Date.parse(ss.lastEmotionSignalAt) >= EMOTION_GAP_MS;
-      if (gapOk && push('emotion_shift', 'recover', pickTemplate(ss, 'emotion:recover', EMOTION_TEMPLATES.recover, now))) ss.lastEmotionSignalAt = iso(now);
-      ss.lowEpisodeOpen = false;
+      if (gapOk && push('emotion_shift', 'recover', pickTemplate(ss, 'emotion:recover', EMOTION_TEMPLATES.recover, now))) {
+        ss.lastEmotionSignalAt = iso(now);
+        ss.lowEpisodeOpen = false;
+      }
     }
   }
 
