@@ -50,7 +50,9 @@ export function loadConfig() {
       readEnabled: bool('OMBRE_READ_ENABLED', false),
       writeEnabled: bool('OMBRE_WRITE_ENABLED', false),
       breathMaxResults: number('OMBRE_BREATH_MAX_RESULTS', 3, 1, 10),
-      breathMaxTokens: number('OMBRE_BREATH_MAX_TOKENS', 800, 200, 3000)
+      breathMaxTokens: number('OMBRE_BREATH_MAX_TOKENS', 800, 200, 3000),
+      // 3.3：把此刻情绪坐标带给 breath（共振排序）和没自带坐标的 hold（情感标签）。
+      emotionStamp: bool('OMBRE_EMOTION_STAMP', true),
     },
     context: {
       enabled: bool('CONTEXT_ENVELOPE_ENABLED', true),

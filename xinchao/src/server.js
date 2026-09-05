@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadConfig, validateConfig } from './config.js';
+import { emotionCoords, stampEmotionArgs } from './emotion.js';
 import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
 import { selectUniqueBark } from './bark-dedupe.js';
@@ -23,6 +24,11 @@ import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
 import { PersonalityStore, computePersonalityStats } from './personality-store.js';
 import { addPending, dropPending, holdPending, markConsumed, markDelivered, markHoldSyncResult, selectForHoldSync } from './pending-queue.js';
+
+// 情绪 → 记忆：只在开关打开时把此刻情绪坐标交给 OB 做共振排序。
+function emotionForOmbre(state) {
+  return config.ombre.emotionStamp ? emotionCoords(state) : null;
+}
 
 const config = validateConfig(loadConfig());
 if (!config.serviceToken) throw new Error('SERVICE_TOKEN is required');
@@ -211,7 +217,7 @@ async function runCycle() {
       let sourceOmbreBucketIds = [];
       if (!config.shadowMode && config.ombre.readEnabled) {
         try {
-          const recalled = await ombre.recentMaterialWithRefs(topDrives(state));
+          const recalled = await ombre.recentMaterialWithRefs(topDrives(state), emotionForOmbre(state));
           sourceOmbreBucketIds = recalled.bucketIds;
           material = await materialFromReferencedBuckets(recalled);
         }
@@ -315,7 +321,7 @@ async function runCycle() {
       let thoughtSourceBucketIds = [];
       if (config.ombre.readEnabled) {
         try {
-          const recalled = await ombre.thoughtMaterialWithRefs(topDrives(state));
+          const recalled = await ombre.thoughtMaterialWithRefs(topDrives(state), emotionForOmbre(state));
           thoughtSourceBucketIds = recalled.bucketIds;
           thoughtMaterial = await materialFromReferencedBuckets(recalled, 5);
         }
@@ -404,7 +410,7 @@ async function runCycle() {
     } else if (!config.shadowMode && config.daytime.enabled && config.ombre.readEnabled && config.bark.enabled && daytimeEmergenceAllowed(state, now, config.daytime)) {
       let selected = { message: '', candidate: { source: 'none' }, reason: 'empty', attempts: 1 };
       try {
-        const recalled = await ombre.daytimeMaterialWithRefs(topDrives(state));
+        const recalled = await ombre.daytimeMaterialWithRefs(topDrives(state), emotionForOmbre(state));
         const material = await materialFromReferencedBuckets(recalled, 5);
         if (config.resonance.enabled && material) {
           const domains = parseSurfacedDomains(material);
@@ -717,7 +723,7 @@ async function createContextEnvelope({
     && config.ombre.readEnabled
   ) {
     try {
-      ombreText = await ombre.recentContinuityMaterial(config.context.ombreMaxTokens);
+      ombreText = await ombre.recentContinuityMaterial(config.context.ombreMaxTokens, emotionForOmbre(state));
     } catch (error) {
       ombreWarning = 'ombre_unavailable';
       log('context_ombre_read_failed', { message: error.message });
@@ -1244,7 +1250,13 @@ const server = createServer(async (request, response) => {
           if (!config.ombre.readEnabled) return [];
           return ombre.listTools();
         },
-        callOb: async (name, args) => ombre.call(name, args),
+        // 情绪 → 记忆：他经网关调 breath/hold 没自己给坐标时，替他带上此刻情绪（grow 不碰）。
+        callOb: async (name, args) => {
+          if (!config.ombre.emotionStamp) return ombre.call(name, args);
+          const stamped = stampEmotionArgs(name, args, await store.read());
+          if (stamped.stamped) log('ombre_emotion_stamped', { tool: String(name).slice(0, 40), ...stamped.coords });
+          return ombre.call(name, stamped.args);
+        },
       });
       if (payload?.method === 'initialize' || payload?.method === 'tools/call') {
         log('mcp_request', {

@@ -177,3 +177,38 @@ export function renderEmotion(summary) {
   const cause = summary.lastCause ? `，最近一次波动来自「${summary.lastCause}」` : '';
   return `此刻情绪：${summary.label}（愉悦=${summary.valence.toFixed(2)} 唤醒=${summary.arousal.toFixed(2)}）${cause}`;
 }
+
+// ── 情绪 → 记忆（3.3 第二步）────────────────────────────────────────
+// OB 的 breath 接受 valence/arousal 作为共振坐标，hold 接受它们作为显式情感标签。
+// 心潮自己去 OB 拉材料时把此刻情绪带上；顾川经心潮网关调 breath/hold 而没自己给坐标时，
+// 也替他补上。grow 没有这个参数，不碰。
+//
+// hold 只在"明显有情绪"时才盖章：平静状态下存一条难过的往事，OB 自己按内容打的标更准；
+// 情绪明显偏离中性时，他此刻的心情大概率就是这条记忆的心情。
+
+export const STAMP_MIN_DEVIATION = 0.15;   // hold 盖章门槛：|valence-0.5| 或 arousal 偏离基线
+
+export function emotionCoords(state) {
+  const summary = emotionSummary(state);
+  return { valence: summary.valence, arousal: summary.arousal };
+}
+
+function hasOwnCoord(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 1;
+}
+
+// 返回补好坐标的 args（新对象），或原 args（没补）。
+export function stampEmotionArgs(name, args, state, options = {}) {
+  const tool = String(name ?? '');
+  const input = args && typeof args === 'object' ? args : {};
+  if (tool !== 'breath' && tool !== 'hold') return { args: input, stamped: false };
+  if (hasOwnCoord(input.valence) || hasOwnCoord(input.arousal)) return { args: input, stamped: false };
+  const coords = emotionCoords(state);
+  if (tool === 'hold') {
+    const minDeviation = Number(options.minDeviation ?? STAMP_MIN_DEVIATION);
+    const deviation = Math.max(Math.abs(coords.valence - 0.5), Math.abs(coords.arousal - EMOTION_BASELINE.arousal));
+    if (deviation < minDeviation) return { args: input, stamped: false };
+  }
+  return { args: { ...input, valence: coords.valence, arousal: coords.arousal }, stamped: true, coords };
+}

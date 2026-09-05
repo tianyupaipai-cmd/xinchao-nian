@@ -78,12 +78,13 @@ export class OmbreClient {
     return [];
   }
 
-  async recentMaterial(drives = []) {
-    return (await this.recentMaterialWithRefs(drives)).text;
+  async recentMaterial(drives = [], emotion = null) {
+    return (await this.recentMaterialWithRefs(drives, emotion)).text;
   }
 
-  async recentMaterialWithRefs(drives = []) {
+  async recentMaterialWithRefs(drives = [], emotion = null) {
     const result = await this.call('breath', {
+      ...emotionArgs(emotion),
       query: withDriveHint('近期重要记忆、情绪、关系变化和未完成事项', drives),
       max_results: this.config.breathMaxResults,
       max_tokens: this.config.breathMaxTokens
@@ -91,12 +92,13 @@ export class OmbreClient {
     return materialWithRefs(extractText(result), 10000);
   }
 
-  async daytimeMaterial(drives = []) {
-    return (await this.daytimeMaterialWithRefs(drives)).text;
+  async daytimeMaterial(drives = [], emotion = null) {
+    return (await this.daytimeMaterialWithRefs(drives, emotion)).text;
   }
 
-  async daytimeMaterialWithRefs(drives = []) {
+  async daytimeMaterialWithRefs(drives = [], emotion = null) {
     const result = await this.call('breath', {
+      ...emotionArgs(emotion),
       query: withDriveHint('白天自然浮现的近期记忆、具体细节、未说完的话和当下牵挂；不要返回系统配置或技术信息', drives),
       max_results: this.config.breathMaxResults,
       max_tokens: this.config.breathMaxTokens
@@ -105,12 +107,13 @@ export class OmbreClient {
   }
 
   // 自主念头用的材料：比日间浮现更短，只要能让念头落到具体的事上。
-  async thoughtMaterial(drives = []) {
-    return (await this.thoughtMaterialWithRefs(drives)).text;
+  async thoughtMaterial(drives = [], emotion = null) {
+    return (await this.thoughtMaterialWithRefs(drives, emotion)).text;
   }
 
-  async thoughtMaterialWithRefs(drives = []) {
+  async thoughtMaterialWithRefs(drives = [], emotion = null) {
     const result = await this.call('breath', {
+      ...emotionArgs(emotion),
       query: withDriveHint('此刻自然想起的一件具体的事：最近的共同经历、说过的话或还惦记着的东西；不要返回系统配置、部署或技术信息', drives),
       max_results: Math.max(1, Math.min(3, Number(this.config.breathMaxResults) || 2)),
       max_tokens: Math.max(200, Math.min(600, Number(this.config.breathMaxTokens) || 400))
@@ -118,8 +121,9 @@ export class OmbreClient {
     return materialWithRefs(extractText(result), 4000);
   }
 
-  async recentContinuityMaterial(maxTokens = this.config.breathMaxTokens) {
+  async recentContinuityMaterial(maxTokens = this.config.breathMaxTokens, emotion = null) {
     const result = await this.call('breath', {
+      ...emotionArgs(emotion),
       query: [
         '新窗口近期连续性：只返回最近发生了什么，以及仍直接影响现在的人物与关系变化、生活重点和未完成约定。',
         '不要返回核心准则、自我基岩或长期画像；这些由客户端从自己的核心指令和长期记忆单独完整读取。',
@@ -291,6 +295,15 @@ export class OmbreClient {
 // （要有原句、词锚或高语义证据）。所以驱动力高不会凭空造出记忆，只会让
 // 本来就有证据的那几条里，跟当下状态相关的先浮上来。末尾那句兜底很重要，
 // 没有它的话强驱动力会把召回卡死成空。
+// 情绪 → 记忆：把此刻情绪坐标交给 breath 做共振排序（OB 没坐标时给中性分 0.5，有坐标就按距离算）。
+function emotionArgs(emotion) {
+  if (!emotion) return {};
+  const v = Number(emotion.valence);
+  const a = Number(emotion.arousal);
+  if (!Number.isFinite(v) || !Number.isFinite(a)) return {};
+  return { valence: Number(Math.max(0, Math.min(1, v)).toFixed(4)), arousal: Number(Math.max(0, Math.min(1, a)).toFixed(4)) };
+}
+
 function withDriveHint(base, drives) {
   const labels = (Array.isArray(drives) ? drives : [])
     .filter((item) => Number(item?.value) >= DRIVE_HINT_MIN)
