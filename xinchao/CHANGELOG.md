@@ -66,6 +66,7 @@
 - 话术第一人称现在时，每种三到五个模板 48h 内不重复，末尾一行"此刻"（驱力短名+档位、情绪词），不带数字与维度名，
   不写"不用回"、不给建议动作。与小屋桥分工：小屋桥说"她做了什么"，这里只说"我怎么样"。
 - `BridgeQueue.enqueue` 新增可选 `ttlHours`。
+- grieve / anger 新增 `decayHalfLifeHours: 24`：没有增长项的情绪型驱力按半衰期往 0 回落，不再永远停在初始 0.15 拽情绪目标。
 - 驱力冲顶只认真的"冲"：起点前 24h 内见过该维在 0.60 以下；稳态趴在天花板上不发（线上实测 12 维长期平线）。
 - compose：OB 3.6+ 的 `/mcp` Bearer 需要 `OMBRE_MCP_AUTH_MODE=hybrid` + `OMBRE_MCP_TOKEN`，已在 compose 里透传。
 

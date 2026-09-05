@@ -91,6 +91,8 @@ export const DIMENSIONS = Object.freeze({
   grieve: {
     label: '难过与失落',
     growPerHour: 0,
+    // 3.3：没有增长项的情绪型驱力自己往 0 回落（半衰期 24h）；此前初始 0.15 就永远 0.15，一直拽着情绪回落目标
+    decayHalfLifeHours: 24,
     ceil: 0.15,
     satisfyMul: 0.60,
     dawnFreeze: false,
@@ -98,6 +100,8 @@ export const DIMENSIONS = Object.freeze({
   anger: {
     label: '生气与不满',
     growPerHour: 0,
+    // 3.3：没有增长项的情绪型驱力自己往 0 回落（半衰期 24h）；此前初始 0.15 就永远 0.15，一直拽着情绪回落目标
+    decayHalfLifeHours: 24,
     ceil: 0.15,
     satisfyMul: 0.40,
     dawnFreeze: false,

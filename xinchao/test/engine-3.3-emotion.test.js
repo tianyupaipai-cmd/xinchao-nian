@@ -115,3 +115,13 @@ test('context envelope and dashboard expose the emotion line', () => {
   assert.equal(snapshot.emotion.label, state.emotion.label);
   assert.equal(typeof snapshot.emotion.valence, 'number');
 });
+
+test('grieve and anger decay toward zero with a 24h half-life instead of parking at 0.15', () => {
+  const state = baseState();
+  state.drives.grieve = 0.8; state.drives.anger = 0.15;
+  const day = settleState(state, new Date(Date.parse(T0) + 24 * 3_600_000)).state;
+  assert.ok(Math.abs(day.drives.grieve - 0.4) < 0.01, String(day.drives.grieve));
+  assert.ok(day.drives.anger < 0.15 && day.drives.anger > 0.07);
+  const week = settleState(day, new Date(Date.parse(T0) + 8 * 24 * 3_600_000)).state;
+  assert.ok(week.drives.grieve < 0.01);
+});

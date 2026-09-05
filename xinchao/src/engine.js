@@ -375,6 +375,13 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
       continue;
     }
 
+    // 情绪型驱力（grieve/anger）：没有增长项，只按半衰期往 0 回落；事件把它抬起来，时间把它放下去。
+    if (Number.isFinite(dim.decayHalfLifeHours) && dim.decayHalfLifeHours > 0) {
+      const next = Number(clamp(current * Math.pow(0.5, elapsedHours / dim.decayHalfLifeHours)).toFixed(4));
+      if (next !== current) changed = true;
+      state.drives[key] = next;
+      continue;
+    }
     // 时间地板 = 每个驱力向自己的静息天花板生长；被事件/共振/回流顶到之上就慢慢松弛回来。
     // 不再让十二维一起爬到同一个 0.80——那样 topDrives 没了区分度，驱力偏置召回也失了信号。
     const baseCeil = Number.isFinite(dim.ceil) ? dim.ceil : SATURATE_CEIL;
