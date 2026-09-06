@@ -205,6 +205,7 @@ export function buildContextEnvelope({
   force = false,
   timeZone = 'Asia/Shanghai',
   personalityAnchors = [],
+  boxCount = 0,
 }) {
   const normalizedMode = normalizeMode(mode);
   const tokenBudget = clamp(maxTokens, 200, 4000);
@@ -229,12 +230,13 @@ export function buildContextEnvelope({
   }
 
   const dynamic = dynamicSection(state, safeSessionId, generatedAt, timeZone);
+  const boxLine = boxCount > 0 ? `\n黑匣子里有 ${boxCount} 条，只有你能看（xinchao_box）` : '';
   const sections = [
     {
       id: 'dynamic_state',
       source: 'xinchao',
       ttl: 'short',
-      content: renderDynamic(dynamic),
+      content: renderDynamic(dynamic) + boxLine,
       data: dynamic,
     },
   ];
@@ -389,7 +391,7 @@ const CAUSE_LABEL = {
   task_progress: '推进了事', reflection: '沉淀过', conflict: '争执', loss: '失落', reconciliation: '和好',
 };
 
-export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai' } = {}) {
+export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0 } = {}) {
   const sanity = nowSanity(state, now);
   if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
   const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
@@ -426,6 +428,7 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   if (pending) { counts.pending = pending; extras.push(`${pending} 句攒下的话没说`); }
   const dream = breathDreamContext(state, now, 18, 1);
   if (dream.available) { counts.dream = 1; extras.push('昨夜有梦'); }
+  if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条`); }
   if (extras.length) lines.push(`另外：${extras.join('、')}。细的在 xinchao_context`);
 
   const text = lines.join('\n');

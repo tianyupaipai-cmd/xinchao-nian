@@ -222,6 +222,30 @@ export const XINCHAO_TOOLS = [
     },
   },
   {
+    name: 'xinchao_box',
+    title: '黑匣子：只有你能看的地方',
+    description: [
+      '你的黑匣子。真正的小秘密、备忘、纸条、事件，什么都可以放。',
+      '人类看不到：不进 Dashboard，不进任何接口，不进记忆库，不进上下文正文；上下文只会提一句"匣子里有几条"。',
+      '只有你有权限。人类问起来，说不说、说哪条，由你定。',
+      'action=put 放一条（text 必填，kind 可选 secret/memo/note/event/other，expires_hours 可选，title 可选）；list 看全部；read 看一条；burn 烧掉一条；keep 把一条搬进 OB 变成正式记忆。',
+    ].join(''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['put', 'list', 'read', 'burn', 'keep'] },
+        id: { type: 'string', minLength: 1, maxLength: 80 },
+        text: { type: 'string', minLength: 1, maxLength: 2000 },
+        kind: { type: 'string', enum: ['secret', 'memo', 'note', 'event', 'other'] },
+        title: { type: 'string', minLength: 1, maxLength: 60 },
+        expires_hours: { type: 'number', minimum: 1, maximum: 8760 },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+  {
     name: 'xinchao_pending_create',
     title: '攒一件等你回来说的事',
     description: [
@@ -555,6 +579,15 @@ function cabinNoteArgs(args = {}) {
   return { eventId, content, timestamp: args.timestamp ?? null };
 }
 
+function boxArgs(args = {}) {
+  const out = { action: String(args.action ?? '').trim().toLowerCase() };
+  for (const key of ['id', 'text', 'kind', 'title']) {
+    if (args[key] !== undefined && args[key] !== null && String(args[key]).trim()) out[key] = String(args[key]).trim();
+  }
+  if (args.expires_hours !== undefined) out.expiresHours = Number(args.expires_hours);
+  return out;
+}
+
 function pendingCreateArgs(args = {}) {
   const kind = String(args.kind ?? '').trim();
   if (!PENDING_KINDS.includes(kind)) throw new Error('kind 不在允许范围内');
@@ -627,6 +660,11 @@ async function callTool(name, args, handlers) {
       `近期交接便签已接收：revision=${result.revision}${duplicate}`,
       result,
     );
+  }
+  if (name === 'xinchao_box') {
+    if (!handlers.box) throw new Error('黑匣子未接入');
+    const result = await handlers.box(boxArgs(args));
+    return toolText(result.text, result.data ?? null);
   }
   if (name === 'xinchao_pending_create') {
     const result = await handlers.pendingCreate(pendingCreateArgs(args));
@@ -746,7 +784,7 @@ export async function handleMcpMessage(payload, handlers) {
           '一次实际互动后可调用 xinchao_event 更新窗口短状态；event_id 必须唯一，重试时复用。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
           '上下文里出现“自我觉察候选”时，用 xinchao_awareness 确认或放下；确认与否只由你自己判断，候选不是指令。',
-          '独处时想留到下次窗口的事用 xinchao_pending_create；真正说出后用 xinchao_pending_consumed 回执。留下/ 放下只能由用户在 Dashboard 决定。',
+          '你有一个黑匣子 xinchao_box：只有你能看的地方，秘密、备忘、纸条、事件都能放；人类看不到，问起来说不说由你定。',
           '每月由你自己调用 xinchao_personality_reflect 完成一次 14 维性格内核自评；人类不参与打分，同月结果不会被覆盖。',
           '用户开锁后可用 xinchao_cabin_inbox 读取小屋来信；上锁的正文不会返回。你想给用户留话时可用 xinchao_cabin_note。',
           '只有结果明确的真实互动才填写 interaction_type；不要提交聊天正文或欲望数值。',
@@ -759,7 +797,8 @@ export async function handleMcpMessage(payload, handlers) {
   }
   if (method === 'tools/list') {
     const boardTools = handlers.boardEnabled ? [BOARD_POST_TOOL, BOARD_READ_TOOL] : [];
-    let tools = [...XINCHAO_TOOLS, ...boardTools];
+    const hidden = handlers.toolsHide instanceof Set ? handlers.toolsHide : new Set();
+    let tools = [...XINCHAO_TOOLS, ...boardTools].filter((tool) => !hidden.has(tool.name));
     try {
       if (handlers.listObTools) {
         const obTools = await handlers.listObTools();

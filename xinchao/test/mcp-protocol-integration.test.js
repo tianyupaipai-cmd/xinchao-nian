@@ -91,3 +91,10 @@ test('OB failure does not remove Xinchao or board tools', async () => {
   assert.ok(names.includes('board_post'));
   assert.ok(names.includes('board_read'));
 });
+
+test('hidden tools disappear from tools/list', async () => {
+  const result = await handleMcpMessage(request('tools/list'), { toolsHide: new Set(['xinchao_pending_create']) });
+  const names = result.body.result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('xinchao_box'));
+  assert.ok(!names.includes('xinchao_pending_create'));
+});

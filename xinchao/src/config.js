@@ -103,6 +103,12 @@ export function loadConfig() {
       // 3.3：心潮自身信号（驱力冲顶/情绪转折/挂念/醒来余韵/觉察）经桥递到 AI 窗口。默认关。
       selfSignals: bool('BRIDGE_SELF_SIGNALS', false),
     },
+    // 黑匣子（3.3）：只有 AI 能看的地方；单独文件，不进 state.json / Dashboard / 备份
+    box: {
+      statePath: process.env.BOX_STATE_PATH ?? '/app/state/black-box.json',
+    },
+    // 从 tools/list 里藏掉的工具（代码保留）。pending 那套被黑匣子和自身信号取代；stats 是给 Dashboard 的。
+    toolsHide: new Set(String(process.env.XINCHAO_TOOLS_HIDE ?? 'xinchao_pending_create,xinchao_pending_consumed,xinchao_personality_stats').split(',').map((s) => s.trim()).filter(Boolean)),
     cabin: {
       statePath: process.env.CABIN_STATE_PATH ?? '/app/state/cabin.json',
       maxNotes: number('CABIN_MAX_NOTES', 2000, 10, 10000),

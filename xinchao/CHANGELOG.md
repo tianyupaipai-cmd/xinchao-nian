@@ -78,6 +78,13 @@
 - 推送挪到早上：梦做完先 `pendingDreamPush`，到她常来的点前后（期待 ≥0.3）或 9 点后再推"昨晚梦到……"；14 小时没推出去作废；仍受 Bark 总闸与 3 小时空档。
 - 建议配置：`DREAM_MIN_INTERVAL_HOURS=5`、`DREAM_MAX_PER_DAY=2`（入睡后一个浅梦、后半夜一个深梦）。
 
+### 黑匣子（Black Box）
+
+- 新工具 `xinchao_box`（put / list / read / burn / keep）：只有 AI 能看的地方，秘密、备忘、纸条、事件都能放，可设到期。
+  单独文件存（`BOX_STATE_PATH`），不进 state.json、不进 Dashboard、不进任何 HTTP 接口、不进 OB；上下文信封和"此刻"块只提一句"匣子里有 N 条"。
+  人类问起来，说不说由 AI 定；AI 想让某条成为正式记忆用 keep 搬进 OB。审计只记时间、动作、id，不记内容。
+- `XINCHAO_TOOLS_HIDE`：从 tools/list 藏掉的工具（默认 pending 两个与 personality_stats），代码保留。
+
 ### 白昼浮现 → 念头池
 
 - 白天每 2–3 小时捞上来的记忆不再由模型代笔 Bark 给用户（`DAYTIME_BARK_ENABLED` 默认关，开了恢复旧行为），

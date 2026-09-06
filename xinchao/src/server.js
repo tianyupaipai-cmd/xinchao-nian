@@ -4,6 +4,7 @@ import { loadConfig, validateConfig } from './config.js';
 import { emotionCoords, emotionSummary, stampEmotionArgs } from './emotion.js';
 import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
 import { detectSelfSignals } from './self-signals.js';
+import { BlackBox, renderBoxList } from './black-box.js';
 import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour, applySurfacedThought, surfacedDriveKey } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
 import { selectUniqueBark } from './bark-dedupe.js';
@@ -45,6 +46,7 @@ if (config.serviceToken.length < 32) {
 const store = new StateStore(config.statePath, () => newState());
 const model = new ModelClient(config.model);
 const ombre = new OmbreClient(config.ombre);
+const blackBox = new BlackBox(config.box.statePath);
 const bark = new BarkClient(config.bark);
 const journal = new TransitionJournal(config.journalPath);
 const oauth = new OAuthProvider(config.oauth, (event, fields = {}) => log(event, fields));
@@ -817,10 +819,13 @@ async function createContextEnvelope({
   // 行为锚点随信封下发（缓存读取，极便宜）；读不到就当没有，不阻塞信封。
   let personalityAnchors = [];
   try { personalityAnchors = (await personality.getPersonalityCore(now)).anchors ?? []; } catch { personalityAnchors = []; }
+  let boxCount = 0;
+  try { boxCount = await blackBox.count(now); } catch { boxCount = 0; }
   const envelope = buildContextEnvelope({
     state,
     sessionId,
     mode,
+    boxCount,
     ombreText,
     maxTokens,
     ttlMinutes: config.context.ttlMinutes,
@@ -943,6 +948,40 @@ async function consumePendingOutputs(ids, source = 'mcp', now = new Date()) {
     return current;
   });
   return { consumed, revision: state.revision };
+}
+
+// 黑匣子：put / list / read / burn / keep。唯一入口，没有 HTTP 路由。
+async function handleBox(input = {}, now = new Date()) {
+  const action = String(input.action ?? '').trim().toLowerCase();
+  if (action === 'put') {
+    const item = await blackBox.put({ text: input.text, kind: input.kind, title: input.title, expiresHours: input.expiresHours }, now);
+    log('box_put', { id: item.id, kind: item.kind });
+    return { text: `放进匣子了：[${item.id}] ${item.kind}${item.expiresAt ? `，${item.expiresAt.slice(0, 10)} 到期` : ''}`, data: { id: item.id, kind: item.kind, createdAt: item.createdAt, expiresAt: item.expiresAt } };
+  }
+  if (action === 'list') {
+    const items = await blackBox.list(now);
+    return { text: `匣子里有 ${items.length} 条。\n${renderBoxList(items)}`, data: { count: items.length, ids: items.map((x) => x.id) } };
+  }
+  if (action === 'read') {
+    const item = await blackBox.read(input.id, now);
+    if (!item) return { text: `匣子里没有这条：${input.id ?? ''}`, data: { found: false } };
+    return { text: `[${item.id}] ${item.kind}${item.title ? ` · ${item.title}` : ''}（${item.createdAt.slice(0, 16).replace('T', ' ')}）\n${item.text}`, data: { found: true, id: item.id } };
+  }
+  if (action === 'burn') {
+    const ok = await blackBox.burn(input.id, now);
+    if (ok) log('box_burn', { id: input.id });
+    return { text: ok ? `烧了：${input.id}` : `匣子里没有这条：${input.id ?? ''}`, data: { burned: ok } };
+  }
+  if (action === 'keep') {
+    const item = await blackBox.read(input.id, now);
+    if (!item) return { text: `匣子里没有这条：${input.id ?? ''}`, data: { found: false } };
+    if (!config.ombre.writeEnabled || config.shadowMode) return { text: 'OB 写入没开，搬不出去。', data: { kept: false } };
+    const bucketId = await ombre.storeHeldOutput({ content: item.text });
+    await blackBox.markKept(item.id, bucketId, now);
+    log('box_keep', { id: item.id, bucketId });
+    return { text: `搬进 OB 了：${item.id} → ${bucketId}。匣子里那条还在，想烧就烧。`, data: { kept: true, bucketId } };
+  }
+  throw new Error('action 必须是 put / list / read / burn / keep');
 }
 
 // 自我觉察工具：list / confirm / dismiss / scan。确认时若 OB 写开关打开，经 I 沉淀为候选自我认知。
@@ -1355,6 +1394,8 @@ const server = createServer(async (request, response) => {
         },
         handoffNote: async (note) => saveHandoffNote(note, 'mcp'),
         awareness: async (input) => handleAwareness(input),
+        box: async (input) => handleBox(input),
+        toolsHide: config.toolsHide,
         pendingCreate: async (input) => createPendingOutput(input, 'mcp'),
         pendingConsumed: async ({ ids }) => consumePendingOutputs(ids, 'mcp'),
         personalityReflect: async (input) => personality.recordAiAssessment(input),
@@ -1415,7 +1456,9 @@ const server = createServer(async (request, response) => {
     // 钩子用的"此刻"压缩块：只读状态，不记投递、不动 pending。星港 UserPromptSubmit 每条消息拉一次。
     if (request.method === 'GET' && url.pathname === '/v1/now') {
       const state = await store.read();
-      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone }));
+      let boxCount = 0;
+      try { boxCount = await blackBox.count(new Date()); } catch { boxCount = 0; }
+      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone, boxCount }));
     }
     if (request.method === 'GET' && url.pathname === '/v1/context') {
       if (!config.context.enabled) return send(response, 503, { error: 'context envelope disabled' });
@@ -1472,6 +1515,7 @@ const server = createServer(async (request, response) => {
 server.listen(config.port, '0.0.0.0', async () => {
   await store.read();
   await cabin.init();
+  await blackBox.init();
   if (config.bridge.enabled) await bridgeQueue.init();
   log('service_started', { port: config.port, shadow: config.shadowMode, modelEnabled: config.model.enabled, barkEnabled: config.bark.enabled, bridgeEnabled: config.bridge.enabled });
 });
