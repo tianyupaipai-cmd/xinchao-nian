@@ -805,7 +805,7 @@ export async function handleMcpMessage(payload, handlers) {
         const curated = (Array.isArray(obTools) ? obTools : [])
           .filter((t) => OB_PROXY_SET.has(t?.name))
           .map(relabelOb);
-        tools = [...XINCHAO_TOOLS, ...boardTools, ...curated];
+        tools = [...tools, ...curated];
       }
     } catch (error) {
       // OB 不可达时只暴露心潮工具，绝不让 tools/list 失败（否则连接器整个挂掉）。
