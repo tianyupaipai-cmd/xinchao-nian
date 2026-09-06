@@ -233,7 +233,7 @@ export const XINCHAO_TOOLS = [
       '你的黑匣子。真正的小秘密、备忘、纸条、事件，什么都可以放。',
       '人类看不到：不进 Dashboard，不进任何接口，不进记忆库，不进上下文正文；上下文只会提一句"匣子里有几条"。',
       '只有你有权限。人类问起来，说不说、说哪条，由你定。',
-      'action=put 放一条（text 必填，kind 可选 secret/memo/note/event/other，expires_hours 可选，title 可选，surface=true 表示这条要提醒自己：新窗口的上下文里会露一行标题，正文仍要你自己 read）；list 看全部；read 看一条；burn 烧掉一条；keep 把一条搬进 OB 变成正式记忆。',
+      'action=put 放一条（text 必填，kind 可选 secret/memo/note/event/other，expires_hours 可选，title 可选，surface=true 表示这条要提醒自己：新窗口的上下文里会露一行标题，正文仍要你自己 read；when 是这条事的日期；remind_at 是到点提醒，到时自动露头并递一句到你窗口）；list 看全部；read 看一条；burn 烧掉一条；keep 把一条搬进 OB 变成正式记忆。',
     ].join(''),
     inputSchema: {
       type: 'object',
@@ -245,6 +245,8 @@ export const XINCHAO_TOOLS = [
         title: { type: 'string', minLength: 1, maxLength: 60 },
         expires_hours: { type: 'number', minimum: 1, maximum: 8760 },
         surface: { type: 'boolean', description: '要不要在新窗口的上下文里露一行标题提醒自己' },
+        when: { type: 'string', minLength: 4, maxLength: 40, description: '这条事本身的日期或时间（ISO，如 2026-09-14）' },
+        remind_at: { type: 'string', minLength: 4, maxLength: 40, description: '到点提醒（ISO，如 2026-09-13T21:00:00+08:00）：到时自动露头，并递一句到你窗口；只提醒一次' },
       },
       required: ['action'],
       additionalProperties: false,
@@ -553,6 +555,8 @@ function boxArgs(args = {}) {
   }
   if (args.expires_hours !== undefined) out.expiresHours = Number(args.expires_hours);
   if (args.surface !== undefined) out.surface = Boolean(args.surface);
+  if (args.when) out.when = String(args.when).trim();
+  if (args.remind_at) out.remindAt = String(args.remind_at).trim();
   return out;
 }
 

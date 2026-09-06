@@ -30,7 +30,7 @@ export class BlackBox {
 
   async init() { await this.store.read(); }
 
-  async put({ text, kind = 'note', expiresHours = null, title = '', surface = false }, now = new Date()) {
+  async put({ text, kind = 'note', expiresHours = null, title = '', surface = false, when = null, remindAt = null }, now = new Date()) {
     const body = String(text ?? '').trim().slice(0, MAX_TEXT);
     if (!body) throw new Error('text 是必填项');
     const item = {
@@ -43,6 +43,10 @@ export class BlackBox {
       kept: null,
       // surface：他想提醒自己的一条。上下文信封里只露标题，正文还得他自己 read。
       surface: Boolean(surface),
+      // when：这条事本身的日期（可选）；remindAt：到点提醒，到时自动 surface 并（若桥开着）递一句到窗口，提醒过一次就不再提
+      when: validIso(when),
+      remindAt: validIso(remindAt),
+      remindedAt: null,
     };
     await this.store.update((box) => {
       box.items = this._sweep(box.items ?? [], now);
@@ -90,7 +94,9 @@ export class BlackBox {
   // 信封用：要露头的条目，只给 id / kind / 标题（没标题就取正文前 20 字）
   async surfaced(now = new Date(), limit = 3) {
     const items = await this.list(now);
-    return items.filter((x) => x.surface).slice(0, limit).map((x) => ({ id: x.id, kind: x.kind, title: x.title || `${x.text.slice(0, 20)}${x.text.length > 20 ? '…' : ''}` }));
+    // 有日期的按日期近的先露头
+    return items.filter((x) => x.surface).sort((a, b) => Date.parse(a.when ?? '9999') - Date.parse(b.when ?? '9999')).slice(0, limit)
+      .map((x) => ({ id: x.id, kind: x.kind, title: `${x.title || `${x.text.slice(0, 20)}${x.text.length > 20 ? '…' : ''}`}${x.when ? `（${x.when.slice(5, 10).replace('-', '/')}）` : ''}` }));
   }
 
   async count(now = new Date()) {
@@ -108,13 +114,33 @@ export class BlackBox {
   }
 }
 
+// 到点的提醒：把 remindAt 已过、还没提醒过的条目标成 surface，返回这些条目（给自身信号用）。
+BlackBox.prototype.dueReminders = async function dueReminders(now = new Date()) {
+  let due = [];
+  await this.store.update((box) => {
+    box.items = this._sweep(box.items ?? [], now);
+    due = box.items.filter((x) => x.remindAt && !x.remindedAt && Date.parse(x.remindAt) <= now.getTime());
+    for (const x of due) { x.surface = true; x.remindedAt = iso(now); this._audit(box, 'remind', x.id, now); }
+    return box;
+  });
+  return structuredClone(due);
+};
+
+function validIso(value) {
+  if (!value) return null;
+  const ms = Date.parse(String(value));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
 export function renderBoxList(items) {
   if (!items.length) return '匣子是空的。';
   return items.map((x) => {
-    const when = x.createdAt.slice(0, 16).replace('T', ' ');
+    const created = x.createdAt.slice(0, 16).replace('T', ' ');
     const exp = x.expiresAt ? `，${x.expiresAt.slice(0, 10)} 到期` : '';
     const kept = x.kept ? '，已搬进 OB' : '';
     const surf = x.surface ? '，会在信封里提醒' : '';
-    return `- [${x.id}] ${x.kind}${x.title ? ` · ${x.title}` : ''}（${when}${exp}${kept}${surf}）\n  ${x.text.length > 160 ? `${x.text.slice(0, 160)}…` : x.text}`;
+    const when = x.when ? `，事在 ${x.when.slice(0, 10)}` : '';
+    const remind = x.remindAt ? (x.remindedAt ? `，${x.remindAt.slice(5, 16).replace('T', ' ')} 提醒过` : `，${x.remindAt.slice(5, 16).replace('T', ' ')} 提醒`) : '';
+    return `- [${x.id}] ${x.kind}${x.title ? ` · ${x.title}` : ''}（${created}${exp}${kept}${surf}${when}${remind}）\n  ${x.text.length > 160 ? `${x.text.slice(0, 160)}…` : x.text}`;
   }).join('\n');
 }

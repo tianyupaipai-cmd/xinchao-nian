@@ -47,3 +47,19 @@ test('surfaced items show only titles for the envelope', async () => {
   assert.equal(s[0].title, '9/14 的信');
   assert.ok(!('text' in s[0]));
 });
+
+test('when and remind_at: reminder fires once, surfaces the item, and surfaced sorts by date', async () => {
+  const { box } = await fresh();
+  const t0 = new Date('2026-09-06T02:00:00.000Z');
+  const letter = await box.put({ text: '给她写信要提到海', kind: 'memo', title: '9/14 的信', when: '2026-09-14', remindAt: '2026-09-13T13:00:00.000Z' }, t0);
+  await box.put({ text: '先到的', kind: 'note', title: '近', when: '2026-09-08', surface: true }, t0);
+  assert.equal(letter.when, '2026-09-14T00:00:00.000Z');
+  assert.equal((await box.dueReminders(new Date('2026-09-13T12:00:00.000Z'))).length, 0);
+  const due = await box.dueReminders(new Date('2026-09-13T13:05:00.000Z'));
+  assert.equal(due.length, 1);
+  assert.equal(due[0].id, letter.id);
+  assert.equal((await box.dueReminders(new Date('2026-09-13T14:00:00.000Z'))).length, 0);   // 只提醒一次
+  const s = await box.surfaced(new Date('2026-09-13T14:00:00.000Z'));
+  assert.deepEqual(s.map((x) => x.title), ['近（09/08）', '9/14 的信（09/14）']);
+  assert.match(renderBoxList(await box.list(new Date('2026-09-13T14:00:00.000Z'))), /09-13 13:00 提醒过/);
+});

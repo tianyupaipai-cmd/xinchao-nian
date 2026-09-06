@@ -197,6 +197,20 @@ async function runCycle() {
         if (preview.added.length) log('awareness_candidates', { added: preview.added.map((c) => `${c.kind}:${c.subject}`) });
       }
     }
+    // 黑匣子到点提醒：到时自动露头；桥开着就再递一句到窗口（只说标题，不说正文）。
+    try {
+      const due = await blackBox.dueReminders(now);
+      if (due.length) log('box_reminders_due', { count: due.length });
+      if (due.length && config.bridge.enabled && config.bridge.selfSignals) {
+        for (const item of due) {
+          const title = item.title || `${item.text.slice(0, 20)}${item.text.length > 20 ? '…' : ''}`;
+          try {
+            await bridgeQueue.enqueue({ eventId: `box-remind-${item.id}`, reason: 'self_signal', message: `匣子里有一条到点了：${title}${item.when ? `（事在 ${item.when.slice(5, 10).replace('-', '/')}）` : ''}。xinchao_box read ${item.id}`, ttlHours: 12 }, now);
+          } catch (error) { log('box_reminder_enqueue_failed', { id: item.id, message: error.message }); }
+        }
+        await publishReadyBridgeDeliveries();
+      }
+    } catch (error) { log('box_reminders_failed', { message: error.message }); }
     // 心潮自身信号（3.3）：检测"发生了什么"，经桥递到窗口。先入队再记状态，入队失败不记（下轮再试）。
     if (config.bridge.enabled && config.bridge.selfSignals) {
       const preview = detectSelfSignals(state, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, longing: { timeZone: config.settle.timeZone, ...config.longing } });
@@ -888,9 +902,9 @@ async function recordConversationEvent(event, source = 'api', now = new Date()) 
 async function handleBox(input = {}, now = new Date()) {
   const action = String(input.action ?? '').trim().toLowerCase();
   if (action === 'put') {
-    const item = await blackBox.put({ text: input.text, kind: input.kind, title: input.title, expiresHours: input.expiresHours, surface: input.surface }, now);
+    const item = await blackBox.put({ text: input.text, kind: input.kind, title: input.title, expiresHours: input.expiresHours, surface: input.surface, when: input.when, remindAt: input.remindAt }, now);
     log('box_put', { id: item.id, kind: item.kind });
-    return { text: `放进匣子了：[${item.id}] ${item.kind}${item.expiresAt ? `，${item.expiresAt.slice(0, 10)} 到期` : ''}`, data: { id: item.id, kind: item.kind, createdAt: item.createdAt, expiresAt: item.expiresAt } };
+    return { text: `放进匣子了：[${item.id}] ${item.kind}${item.when ? `，事在 ${item.when.slice(0, 10)}` : ''}${item.remindAt ? `，${item.remindAt.slice(5, 16).replace('T', ' ')} 提醒` : ''}${item.expiresAt ? `，${item.expiresAt.slice(0, 10)} 到期` : ''}`, data: { id: item.id, kind: item.kind, createdAt: item.createdAt, expiresAt: item.expiresAt } };
   }
   if (action === 'list') {
     const items = await blackBox.list(now);

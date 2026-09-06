@@ -94,6 +94,7 @@
   上下文信封不再有 `pending_from_me` 段；`put` 时带 `surface=true` 的匣子条目会在信封里露一行标题（正文仍需 AI 自己 read）。
   升级时未说出口、未被放下的旧条目自动迁进匣子（memo，带 surface）。Dashboard `/dashboard/api/pending` GET 只回退役说明，PATCH 回 410；网页"留下/放下"页可下线。
 - `XINCHAO_TOOLS_HIDE`：从 tools/list 藏掉的工具（默认 personality_stats），代码保留。
+- 黑匣子加 `when`（这条事的日期，露头时按日期近的先）与 `remind_at`（到点提醒：自动 surface，桥开着再递一句 `匣子里有一条到点了：标题` 到窗口，只提醒一次）。
 
 ### 白昼浮现 → 念头池
 
