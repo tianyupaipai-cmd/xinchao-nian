@@ -211,7 +211,8 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
   if (signals.length) {
     ss.dayUsage[day] = Number(ss.dayUsage[day] ?? 0) + signals.length;
     for (const key of Object.keys(ss.dayUsage)) if (key < day.slice(0, 10) && Object.keys(ss.dayUsage).length > 7) delete ss.dayUsage[key];
-    ss.history = [...ss.history, ...signals.map((s) => ({ kind: s.kind, subject: s.subject, at: iso(now) }))].slice(-60);
+    // 历史里带上那句话本身（去掉末尾的"此刻"行，≤60 字），给 Dashboard 的回声页看
+    ss.history = [...ss.history, ...signals.map((s) => ({ kind: s.kind, subject: s.subject, at: iso(now), text: String(s.text).split('\n')[0].slice(0, 60) }))].slice(-60);
   }
   const changed = JSON.stringify(ss) !== JSON.stringify(input?.selfSignals ?? null);
   if (changed) state.revision = Number(state.revision ?? 0) + 1;

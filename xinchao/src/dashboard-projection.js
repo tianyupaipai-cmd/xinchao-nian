@@ -174,6 +174,13 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
     personality: projectedPersonality(personalityCore, config),
     // 自我觉察（3.3）：候选与已确认，文本是关于 AI 自己的模式描述，不含对话正文。
     awareness: awarenessSummary(state),
+    // 心潮自身信号（3.3）：他不在窗口时心潮记下并递出去的那几句。只有类型、时间和那一句，没有正文以外的东西。
+    signals: (() => {
+      const history = Array.isArray(state.selfSignals?.history) ? state.selfSignals.history : [];
+      const recent = history.slice(-20).reverse().map((item) => ({ kind: compact(item?.kind, 40), subject: compact(item?.subject, 40), text: compact(item?.text, 80) || null, at: validDate(item?.at) }));
+      const dayAgo = generatedAt.getTime() - 24 * 3_600_000;
+      return { last24h: history.filter((item) => Date.parse(item?.at ?? '') >= dayAgo).length, recent };
+    })(),
     thoughts: projectedThoughts(state, Boolean(config.dashboard?.includePrivateText)),
     dreams: projectedDreams(
       state,
