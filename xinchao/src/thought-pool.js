@@ -1,4 +1,7 @@
-const FLASH_DECAY       = 0.82;
+const FLASH_DECAY       = 0.82;   // 默认：每次结算（15min）×0.82，约 50 分钟半衰
+// 3.3：闪念可以带自己的衰减率。浮现来的闪念要慢（0.945 ≈ 3 小时半衰），不然浮现间隔 2–3h，池子永远攒不起来。
+export const SURFACED_DECAY = 0.945;
+export const DREAM_DECAY = 0.90;
 const OBSESSION_GROWTH  = 1.10;
 const PROMOTE_THRESHOLD = 0.50;
 const PROMOTE_MIN_AGE   = 3;
@@ -14,7 +17,7 @@ export function newThoughtPool() {
 
 export function tickThoughtPool(pool) {
   pool.flash = pool.flash
-    .map((t) => ({ ...t, intensity: t.intensity * FLASH_DECAY, age: t.age + 1 }))
+    .map((t) => ({ ...t, intensity: t.intensity * (Number.isFinite(t.decay) && t.decay > 0 && t.decay < 1 ? t.decay : FLASH_DECAY), age: t.age + 1 }))
     .filter((t) => t.intensity > 0.05);
 
   const promoted = [];
@@ -70,6 +73,7 @@ export function addFlashThought(pool, key, text, intensity = 0.70, metadata = {}
     text,
     intensity: Math.min(1, intensity),
     age: 0,
+    ...(Number.isFinite(metadata.decay) ? { decay: metadata.decay } : {}),
     ...normalizeMemoryRefs(metadata),
   });
 }
@@ -93,6 +97,8 @@ export function reinforceThought(pool, key, text, amount = 0.30, metadata = {}) 
   if (existing) {
     existing.intensity = Math.min(1, existing.intensity + step);
     if (text) existing.text = text;
+    // 再次被强化时取更慢的那个衰减：反复浮现的东西本来就该留得久
+    if (Number.isFinite(metadata.decay)) existing.decay = Math.max(existing.decay ?? 0, metadata.decay);
     const refs = normalizeMemoryRefs(metadata);
     if (refs.ombreBucketId) existing.ombreBucketId = refs.ombreBucketId;
     existing.sourceOmbreBucketIds = [...new Set([

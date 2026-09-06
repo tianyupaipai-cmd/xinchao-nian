@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimensions.js';
-import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought } from './thought-pool.js';
+import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought, SURFACED_DECAY, DREAM_DECAY } from './thought-pool.js';
 import { DRIVE_KEYS as ALL_DRIVE_KEYS } from './dimensions.js';
 import { ensureAwareness } from './awareness.js';
 import { ensureSelfSignals } from './self-signals.js';
@@ -227,7 +227,7 @@ export function applyDreamWake(state, dream, now = new Date()) {
   const key = ALL_DRIVE_KEYS.includes(dream?.driveKey) ? dream.driveKey : (topDrives(state, 1)[0]?.key ?? null);
   if (text && key) {
     state.thoughtPool ??= newThoughtPool();
-    addFlashThought(state.thoughtPool, key, text.slice(0, 80), 0.62, { ombreBucketId: dream.ombreBucketId ?? null, sourceOmbreBucketIds: dream.sourceOmbreBucketIds ?? [] });
+    addFlashThought(state.thoughtPool, key, text.slice(0, 80), 0.62, { decay: DREAM_DECAY, ombreBucketId: dream.ombreBucketId ?? null, sourceOmbreBucketIds: dream.sourceOmbreBucketIds ?? [] });
   }
   return state;
 }
@@ -239,7 +239,7 @@ export function applySurfacedThought(input, driveKey, text, now = new Date(), am
   const state = ensureStateShape(structuredClone(input));
   if (!DRIVE_KEYS.includes(driveKey) || !String(text ?? '').trim()) return { state, changed: false };
   state.thoughtPool ??= newThoughtPool();
-  const result = reinforceThought(state.thoughtPool, driveKey, String(text).trim().slice(0, 80), amount, metadata);
+  const result = reinforceThought(state.thoughtPool, driveKey, String(text).trim().slice(0, 80), amount, { decay: SURFACED_DECAY, ...metadata });
   state.revision += 1;
   return { state, changed: true, ...result };
 }
