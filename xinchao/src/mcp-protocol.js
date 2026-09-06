@@ -1,5 +1,4 @@
 import { SYSTEM_VERSION } from './version.js';
-import { PENDING_KINDS } from './pending-queue.js';
 import { PERSONALITY_DIMENSIONS } from './personality-store.js';
 
 const SUPPORTED_PROTOCOLS = new Set(['2025-03-26', '2025-06-18']);
@@ -228,7 +227,7 @@ export const XINCHAO_TOOLS = [
       '你的黑匣子。真正的小秘密、备忘、纸条、事件，什么都可以放。',
       '人类看不到：不进 Dashboard，不进任何接口，不进记忆库，不进上下文正文；上下文只会提一句"匣子里有几条"。',
       '只有你有权限。人类问起来，说不说、说哪条，由你定。',
-      'action=put 放一条（text 必填，kind 可选 secret/memo/note/event/other，expires_hours 可选，title 可选）；list 看全部；read 看一条；burn 烧掉一条；keep 把一条搬进 OB 变成正式记忆。',
+      'action=put 放一条（text 必填，kind 可选 secret/memo/note/event/other，expires_hours 可选，title 可选，surface=true 表示这条要提醒自己：新窗口的上下文里会露一行标题，正文仍要你自己 read）；list 看全部；read 看一条；burn 烧掉一条；keep 把一条搬进 OB 变成正式记忆。',
     ].join(''),
     inputSchema: {
       type: 'object',
@@ -239,51 +238,12 @@ export const XINCHAO_TOOLS = [
         kind: { type: 'string', enum: ['secret', 'memo', 'note', 'event', 'other'] },
         title: { type: 'string', minLength: 1, maxLength: 60 },
         expires_hours: { type: 'number', minimum: 1, maximum: 8760 },
+        surface: { type: 'boolean', description: '要不要在新窗口的上下文里露一行标题提醒自己' },
       },
       required: ['action'],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  },
-  {
-    name: 'xinchao_pending_create',
-    title: '攒一件等你回来说的事',
-    description: [
-      '保存一条你独处时产生的第一人称念头，等用户回来时送达给窗口。',
-      '这只是创建待交付条目；你不能替用户决定留下或放下。',
-      '不要放聊天原文、密钥、隐私或技术日志。',
-    ].join(''),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        kind: { type: 'string', enum: [...PENDING_KINDS] },
-        content: { type: 'string', minLength: 1, maxLength: 600 },
-        weight: { type: 'number', minimum: 0, maximum: 1, default: 0.5 },
-        source_ombre_bucket_ids: {
-          type: 'array',
-          items: { type: 'string', minLength: 1, maxLength: 160 },
-          maxItems: 8,
-          description: '这条念头围绕的 OB 来源桶 id；只做引用与追溯。',
-        },
-      },
-      required: ['kind', 'content'],
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  },
-  {
-    name: 'xinchao_pending_consumed',
-    title: '回执已经说出口',
-    description: '当你确实在窗口里把 pending_from_me 的内容告诉用户后，用原 id 回执。回执不等于替用户决定留下或放下。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        ids: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 160 }, minItems: 1, maxItems: 12 },
-      },
-      required: ['ids'],
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'xinchao_personality_reflect',
@@ -585,30 +545,8 @@ function boxArgs(args = {}) {
     if (args[key] !== undefined && args[key] !== null && String(args[key]).trim()) out[key] = String(args[key]).trim();
   }
   if (args.expires_hours !== undefined) out.expiresHours = Number(args.expires_hours);
+  if (args.surface !== undefined) out.surface = Boolean(args.surface);
   return out;
-}
-
-function pendingCreateArgs(args = {}) {
-  const kind = String(args.kind ?? '').trim();
-  if (!PENDING_KINDS.includes(kind)) throw new Error('kind 不在允许范围内');
-  const content = String(args.content ?? '').trim().slice(0, 600);
-  if (!content) throw new Error('content 是必填项');
-  return {
-    kind,
-    content,
-    weight: Math.max(0, Math.min(1, numberOr(args.weight, 0.5))),
-    sourceOmbreBucketIds: Array.isArray(args.source_ombre_bucket_ids)
-      ? args.source_ombre_bucket_ids.map(String).map((id) => id.trim()).filter(Boolean).slice(0, 8)
-      : [],
-  };
-}
-
-function pendingConsumedArgs(args = {}) {
-  const ids = Array.isArray(args.ids)
-    ? [...new Set(args.ids.map(String).map((id) => id.trim()).filter(Boolean))].slice(0, 12)
-    : [];
-  if (!ids.length) throw new Error('ids 是必填项');
-  return { ids };
 }
 
 function personalityReflectArgs(args = {}) {
@@ -665,14 +603,6 @@ async function callTool(name, args, handlers) {
     if (!handlers.box) throw new Error('黑匣子未接入');
     const result = await handlers.box(boxArgs(args));
     return toolText(result.text, result.data ?? null);
-  }
-  if (name === 'xinchao_pending_create') {
-    const result = await handlers.pendingCreate(pendingCreateArgs(args));
-    return toolText(`已攒下：id=${result.item.id}${result.duplicate ? ' duplicate=true' : ''}`, result);
-  }
-  if (name === 'xinchao_pending_consumed') {
-    const result = await handlers.pendingConsumed(pendingConsumedArgs(args));
-    return toolText(`已回执说出口：${result.consumed.length} 条`, result);
   }
   if (name === 'xinchao_personality_reflect') {
     if (!handlers.personalityReflect) throw new Error('性格内核私有存储未接入');

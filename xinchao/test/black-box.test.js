@@ -37,3 +37,13 @@ test('kind falls back to other and text is required', async () => {
   assert.equal(x.kind, 'other');
   await assert.rejects(() => box.put({ text: '   ' }), /text/);
 });
+
+test('surfaced items show only titles for the envelope', async () => {
+  const { box } = await fresh();
+  await box.put({ text: '给她写信要提到海', kind: 'memo', surface: true, title: '9/14 的信' });
+  await box.put({ text: '这条不露头', kind: 'secret' });
+  const s = await box.surfaced();
+  assert.equal(s.length, 1);
+  assert.equal(s[0].title, '9/14 的信');
+  assert.ok(!('text' in s[0]));
+});

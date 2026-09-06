@@ -26,7 +26,6 @@ import { boardEnabled, postBoardMessage, readBoardMessages } from './board-clien
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
 import { PersonalityStore, computePersonalityStats } from './personality-store.js';
-import { addPending, dropPending, holdPending, markConsumed, markDelivered, markHoldSyncResult, selectForHoldSync } from './pending-queue.js';
 
 // 情绪 → 记忆：只在开关打开时把此刻情绪坐标交给 OB 做共振排序。
 function emotionForOmbre(state) {
@@ -115,50 +114,6 @@ async function synchronizeOmbreHeartbeat() {
   return state;
 }
 
-async function synchronizeHeldPending(limit = 3, now = new Date()) {
-  const snapshot = await store.read();
-  const items = selectForHoldSync(snapshot, limit);
-  for (const item of items) {
-    let bucketId = String(item.holdSync?.landedBucketId ?? item.ombreBucketId ?? '').trim();
-    const alreadyLinked = new Set(item.holdSync?.linkedSourceBucketIds ?? []);
-    let newlyLinked = [];
-    try {
-      if (!config.ombre.writeEnabled) throw new Error('ombre_write_disabled');
-      if (!bucketId) bucketId = await ombre.storeHeldOutput(item);
-      const missingSources = (item.sourceOmbreBucketIds ?? [])
-        .filter((id) => id && id !== bucketId && !alreadyLinked.has(id));
-      if (missingSources.length) {
-        newlyLinked = await ombre.traceHeldOutputSources(bucketId, missingSources);
-      }
-      await updateState({
-        type: 'pending_hold_synced', source: 'pending-hold', details: { pendingId: item.id }, at: now,
-      }, (state) => {
-        markHoldSyncResult(state, item.id, {
-          ok: true,
-          ombreBucketId: bucketId,
-          linkedSourceBucketIds: newlyLinked,
-        }, now);
-        state.revision = Number(state.revision ?? 0) + 1;
-        return state;
-      });
-    } catch (error) {
-      await updateState({
-        type: 'pending_hold_retry', source: 'pending-hold', details: { pendingId: item.id }, at: now,
-      }, (state) => {
-        markHoldSyncResult(state, item.id, {
-          ok: false,
-          ombreBucketId: bucketId || null,
-          linkedSourceBucketIds: newlyLinked,
-          error: error.message,
-        }, now);
-        state.revision = Number(state.revision ?? 0) + 1;
-        return state;
-      });
-      log('pending_hold_sync_failed', { pendingId: item.id, message: error.message });
-    }
-  }
-  return items.length;
-}
 
 async function materialFromReferencedBuckets(recalled, maxLines = 7) {
   const ids = recalled?.bucketIds ?? [];
@@ -572,7 +527,6 @@ async function runCycle() {
       }, (latest) => scheduleDaytimeEmergence(latest, now, config.daytime.minIntervalHours, config.daytime.maxIntervalHours));
       log('daytime_emergence_scheduled', { nextAt: state.nextDaytimeEmergenceAt, revision: state.revision });
     }
-    await synchronizeHeldPending(3, now);
     return { state, dreamCreated, barkSent, daytimeSent };
   })().finally(() => { cyclePromise = null; });
   return cyclePromise;
@@ -769,12 +723,8 @@ async function dashboardPayload(pathname, url) {
   if (pathname.endsWith('/cabin')) return cabin.snapshot();
   if (pathname.endsWith('/personality')) return personality.getPersonalityCore();
   if (pathname.endsWith('/pending')) {
-    const state = await store.read();
-    return {
-      schemaVersion: 1,
-      generatedAt: new Date().toISOString(),
-      items: (state.pending ?? []).map((item) => structuredClone(item)),
-    };
+    // 3.3：攒下的话退役，黑匣子接替。人类看不到匣子，这里只回一个说明，不回条目。
+    return { schemaVersion: 2, generatedAt: new Date().toISOString(), retired: true, items: [], note: '攒下的话已并入黑匣子（只有 AI 能看）；这一页可以下线了。' };
   }
   return null;
 }
@@ -819,13 +769,14 @@ async function createContextEnvelope({
   // 行为锚点随信封下发（缓存读取，极便宜）；读不到就当没有，不阻塞信封。
   let personalityAnchors = [];
   try { personalityAnchors = (await personality.getPersonalityCore(now)).anchors ?? []; } catch { personalityAnchors = []; }
-  let boxCount = 0;
-  try { boxCount = await blackBox.count(now); } catch { boxCount = 0; }
+  let boxCount = 0; let boxSurfaced = [];
+  try { boxCount = await blackBox.count(now); boxSurfaced = await blackBox.surfaced(now); } catch { boxCount = 0; boxSurfaced = []; }
   const envelope = buildContextEnvelope({
     state,
     sessionId,
     mode,
     boxCount,
+    boxSurfaced,
     ombreText,
     maxTokens,
     ttlMinutes: config.context.ttlMinutes,
@@ -836,8 +787,6 @@ async function createContextEnvelope({
     personalityAnchors,
   });
   if (envelope.delivered) {
-    const pendingIds = envelope.sections
-      .find((section) => section.id === 'pending_from_me')?.data?.ids ?? [];
     state = await updateState({
       type: 'context_delivery',
       source: 'context-adapter',
@@ -858,9 +807,6 @@ async function createContextEnvelope({
         digest: envelope.digest,
         deliveredAt: now,
       });
-      if (pendingIds.length && markDelivered(next, pendingIds, now)) {
-        next.revision = Number(next.revision ?? 0) + 1;
-      }
       return next;
     });
   }
@@ -923,38 +869,11 @@ async function recordConversationEvent(event, source = 'api', now = new Date()) 
   };
 }
 
-async function createPendingOutput(input, source = 'mcp', now = new Date()) {
-  let item;
-  let duplicate = false;
-  const state = await updateState({
-    type: 'pending_created', source, details: { kind: input.kind }, at: now,
-  }, (current) => {
-    const beforeIds = new Set((current.pending ?? []).map((entry) => entry.id));
-    item = addPending(current, input, now);
-    duplicate = Boolean(item && beforeIds.has(item.id));
-    if (item) current.revision = Number(current.revision ?? 0) + 1;
-    return current;
-  });
-  return { item, duplicate, revision: state.revision };
-}
-
-async function consumePendingOutputs(ids, source = 'mcp', now = new Date()) {
-  let consumed = [];
-  const state = await updateState({
-    type: 'pending_consumed', source, details: { count: ids.length }, at: now,
-  }, (current) => {
-    consumed = markConsumed(current, ids, now);
-    if (consumed.length) current.revision = Number(current.revision ?? 0) + 1;
-    return current;
-  });
-  return { consumed, revision: state.revision };
-}
-
 // 黑匣子：put / list / read / burn / keep。唯一入口，没有 HTTP 路由。
 async function handleBox(input = {}, now = new Date()) {
   const action = String(input.action ?? '').trim().toLowerCase();
   if (action === 'put') {
-    const item = await blackBox.put({ text: input.text, kind: input.kind, title: input.title, expiresHours: input.expiresHours }, now);
+    const item = await blackBox.put({ text: input.text, kind: input.kind, title: input.title, expiresHours: input.expiresHours, surface: input.surface }, now);
     log('box_put', { id: item.id, kind: item.kind });
     return { text: `放进匣子了：[${item.id}] ${item.kind}${item.expiresAt ? `，${item.expiresAt.slice(0, 10)} 到期` : ''}`, data: { id: item.id, kind: item.kind, createdAt: item.createdAt, expiresAt: item.expiresAt } };
   }
@@ -1215,42 +1134,9 @@ const server = createServer(async (request, response) => {
         }
       }
       if (url.pathname === '/dashboard/api/pending') {
-        if (request.method === 'GET') {
-          return send(response, 200, await dashboardPayload(url.pathname, url));
-        }
-        if (request.method === 'PATCH') {
-          try {
-            const payload = await body(request);
-            const ids = Array.isArray(payload.ids)
-              ? [...new Set(payload.ids.map(String).map((id) => id.trim()).filter(Boolean))].slice(0, 12)
-              : [];
-            if (!ids.length) return send(response, 400, { error: 'ids required' });
-            let affected = [];
-            const action = String(payload.action ?? '').trim().toLowerCase();
-            let state = await updateState({
-              type: action === 'hold' ? 'pending_held' : 'pending_dropped',
-              source: 'dashboard',
-              details: { action, count: ids.length },
-              at: new Date(),
-            }, (current) => {
-              if (action === 'hold') affected = holdPending(current, ids);
-              else if (action === 'drop') affected = dropPending(current, ids);
-              else throw new Error('action must be hold or drop');
-              if (affected.length) current.revision = Number(current.revision ?? 0) + 1;
-              return current;
-            });
-            if (action === 'hold' && affected.length) {
-              await synchronizeHeldPending(affected.length);
-              // hold 可能紧接着完成 OB 落地/失败重试记账；返回最新修订号，
-              // 避免 Dashboard 用过期 revision 覆盖刚刚发生的同步结果。
-              state = await store.read();
-            }
-            return send(response, 200, { action, affected, revision: state.revision });
-          } catch (error) {
-            return send(response, 400, { error: error.message });
-          }
-        }
-        return send(response, 405, { error: 'method not allowed' }, { Allow: 'GET, PATCH' });
+        // 3.3：退役。GET 回说明，PATCH 回 410，网页那页可以下线。
+        if (request.method === 'GET') return send(response, 200, await dashboardPayload(url.pathname, url));
+        return send(response, 410, { error: 'pending_from_me 已退役，黑匣子接替；人类看不到匣子里的内容。' });
       }
       if (url.pathname === '/dashboard/api/bridge/deliveries') {
         if (!config.bridge.enabled) return send(response, 503, { error: 'bridge disabled' });
@@ -1396,8 +1282,6 @@ const server = createServer(async (request, response) => {
         awareness: async (input) => handleAwareness(input),
         box: async (input) => handleBox(input),
         toolsHide: config.toolsHide,
-        pendingCreate: async (input) => createPendingOutput(input, 'mcp'),
-        pendingConsumed: async ({ ids }) => consumePendingOutputs(ids, 'mcp'),
         personalityReflect: async (input) => personality.recordAiAssessment(input),
         personalityStats: async () => {
           const core = await personality.getPersonalityCore();
@@ -1456,9 +1340,9 @@ const server = createServer(async (request, response) => {
     // 钩子用的"此刻"压缩块：只读状态，不记投递、不动 pending。星港 UserPromptSubmit 每条消息拉一次。
     if (request.method === 'GET' && url.pathname === '/v1/now') {
       const state = await store.read();
-      let boxCount = 0;
-      try { boxCount = await blackBox.count(new Date()); } catch { boxCount = 0; }
-      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone, boxCount }));
+      let boxCount = 0; let boxSurfaced = 0;
+      try { boxCount = await blackBox.count(new Date()); boxSurfaced = (await blackBox.surfaced(new Date())).length; } catch { boxCount = 0; }
+      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone, boxCount, boxSurfaced }));
     }
     if (request.method === 'GET' && url.pathname === '/v1/context') {
       if (!config.context.enabled) return send(response, 503, { error: 'context envelope disabled' });
@@ -1516,6 +1400,18 @@ server.listen(config.port, '0.0.0.0', async () => {
   await store.read();
   await cabin.init();
   await blackBox.init();
+  // 3.3 升级迁移：攒下的话（pending_from_me）退役，还没说出口、也没被放下的条目搬进黑匣子当备忘，然后从状态里拿掉。
+  try {
+    const snapshot = await store.read();
+    const leftovers = (Array.isArray(snapshot.pending) ? snapshot.pending : []).filter((item) => item?.status !== 'consumed' && item?.disposition !== 'dropped' && String(item?.content ?? '').trim());
+    for (const item of leftovers) {
+      await blackBox.put({ text: String(item.content).trim(), kind: 'memo', title: `从攒下的话迁来 · ${item.kind ?? ''}`.trim(), surface: true });
+    }
+    if (Array.isArray(snapshot.pending)) {
+      await updateState({ type: 'pending_retired', source: 'migration', details: { migrated: leftovers.length }, at: new Date() }, (current) => { delete current.pending; return current; });
+      log('pending_retired', { migrated: leftovers.length });
+    }
+  } catch (error) { log('pending_migration_failed', { message: error.message }); }
   if (config.bridge.enabled) await bridgeQueue.init();
   log('service_started', { port: config.port, shadow: config.shadowMode, modelEnabled: config.model.enabled, barkEnabled: config.bark.enabled, bridgeEnabled: config.bridge.enabled });
 });

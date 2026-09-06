@@ -107,8 +107,8 @@ export function loadConfig() {
     box: {
       statePath: process.env.BOX_STATE_PATH ?? '/app/state/black-box.json',
     },
-    // 从 tools/list 里藏掉的工具（代码保留）。pending 那套被黑匣子和自身信号取代；stats 是给 Dashboard 的。
-    toolsHide: new Set(String(process.env.XINCHAO_TOOLS_HIDE ?? 'xinchao_pending_create,xinchao_pending_consumed,xinchao_personality_stats').split(',').map((s) => s.trim()).filter(Boolean)),
+    // 从 tools/list 里藏掉的工具（代码保留）。stats 是给 Dashboard 的。
+    toolsHide: new Set(String(process.env.XINCHAO_TOOLS_HIDE ?? 'xinchao_personality_stats').split(',').map((s) => s.trim()).filter(Boolean)),
     cabin: {
       statePath: process.env.CABIN_STATE_PATH ?? '/app/state/cabin.json',
       maxNotes: number('CABIN_MAX_NOTES', 2000, 10, 10000),

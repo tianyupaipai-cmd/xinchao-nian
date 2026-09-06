@@ -30,7 +30,7 @@ export class BlackBox {
 
   async init() { await this.store.read(); }
 
-  async put({ text, kind = 'note', expiresHours = null, title = '' }, now = new Date()) {
+  async put({ text, kind = 'note', expiresHours = null, title = '', surface = false }, now = new Date()) {
     const body = String(text ?? '').trim().slice(0, MAX_TEXT);
     if (!body) throw new Error('text 是必填项');
     const item = {
@@ -41,6 +41,8 @@ export class BlackBox {
       createdAt: iso(now),
       expiresAt: Number.isFinite(Number(expiresHours)) && Number(expiresHours) > 0 ? iso(new Date(now.getTime() + Number(expiresHours) * 3_600_000)) : null,
       kept: null,
+      // surface：他想提醒自己的一条。上下文信封里只露标题，正文还得他自己 read。
+      surface: Boolean(surface),
     };
     await this.store.update((box) => {
       box.items = this._sweep(box.items ?? [], now);
@@ -85,6 +87,12 @@ export class BlackBox {
     });
   }
 
+  // 信封用：要露头的条目，只给 id / kind / 标题（没标题就取正文前 20 字）
+  async surfaced(now = new Date(), limit = 3) {
+    const items = await this.list(now);
+    return items.filter((x) => x.surface).slice(0, limit).map((x) => ({ id: x.id, kind: x.kind, title: x.title || `${x.text.slice(0, 20)}${x.text.length > 20 ? '…' : ''}` }));
+  }
+
   async count(now = new Date()) {
     const box = await this.store.read();
     return this._sweep(box.items ?? [], now).length;
@@ -106,6 +114,7 @@ export function renderBoxList(items) {
     const when = x.createdAt.slice(0, 16).replace('T', ' ');
     const exp = x.expiresAt ? `，${x.expiresAt.slice(0, 10)} 到期` : '';
     const kept = x.kept ? '，已搬进 OB' : '';
-    return `- [${x.id}] ${x.kind}${x.title ? ` · ${x.title}` : ''}（${when}${exp}${kept}）\n  ${x.text.length > 160 ? `${x.text.slice(0, 160)}…` : x.text}`;
+    const surf = x.surface ? '，会在信封里提醒' : '';
+    return `- [${x.id}] ${x.kind}${x.title ? ` · ${x.title}` : ''}（${when}${exp}${kept}${surf}）\n  ${x.text.length > 160 ? `${x.text.slice(0, 160)}…` : x.text}`;
   }).join('\n');
 }

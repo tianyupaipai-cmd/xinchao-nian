@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { applyConversationEvent, newState, settleState } from '../src/engine.js';
-import { buildNowCompact, nowSanity } from '../src/context-envelope.js';
+import { buildContextEnvelope, buildNowCompact, nowSanity } from '../src/context-envelope.js';
 
 const T0 = '2026-09-05T08:00:00.000Z';
 const at = (h) => new Date(Date.parse(T0) + h * 3_600_000);
@@ -84,4 +84,15 @@ test('emotion line is specific: bands and a drive flavour, never a bare 平静',
   assert.match(now.text, /情绪：平静偏暖，有点起伏，带一点馋/);
   const low = baseState(); low.emotion.valence = 0.3; low.emotion.arousal = 0.7;
   assert.match(buildNowCompact(low, at(0)).text, /情绪：烦躁，绷着/);
+});
+
+test('envelope and now-block mention the box count and surfaced titles only', () => {
+  const state = baseState();
+  const envelope = buildContextEnvelope({ state, sessionId: 's1', now: at(0), boxCount: 2, boxSurfaced: [{ id: 'box-1', kind: 'memo', title: '9/14 的信' }] });
+  const dyn = envelope.sections.find((s) => s.id === 'dynamic_state').content;
+  assert.match(dyn, /黑匣子里有 2 条/);
+  assert.match(dyn, /你想提醒自己的：9\/14 的信（xinchao_box read box-1）/);
+  assert.ok(!envelope.sections.some((s) => s.id === 'pending_from_me'));
+  const now = buildNowCompact(state, at(0), { boxCount: 2, boxSurfaced: 1 });
+  assert.match(now.text, /匣子里 2 条（1 条要提醒你）/);
 });

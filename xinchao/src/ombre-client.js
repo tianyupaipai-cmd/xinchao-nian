@@ -274,10 +274,10 @@ export class OmbreClient {
   async storeHeldOutput(item) {
     if (!this.config.writeEnabled) throw new Error('ombre_write_disabled');
     const content = String(item?.content ?? '').trim();
-    if (!content) throw new Error('pending_content_empty');
+    if (!content) throw new Error('box_content_empty');
     const result = await this.call('grow', {
       content,
-      source: 'xinchao-pending-hold',
+      source: 'xinchao-box-keep',
     });
     const text = extractText(result);
     const bucketId = parseGrowBucketIds(text)[0] ?? null;

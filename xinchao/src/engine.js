@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimensions.js';
 import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought } from './thought-pool.js';
 import { DRIVE_KEYS as ALL_DRIVE_KEYS } from './dimensions.js';
-import { tickPending } from './pending-queue.js';
 import { ensureAwareness } from './awareness.js';
 import { ensureSelfSignals } from './self-signals.js';
 import { INTERACTION_EMOTION, applyEmotionImpulse, blendEmotionTowardTone, emotionGrowthFactor, ensureEmotion, newEmotion, settleEmotion } from './emotion.js';
@@ -63,7 +62,7 @@ function ensureStateShape(state) {
     : [];
   state.interactionUsage ??= {};
   state.handoffNotes = Array.isArray(state.handoffNotes) ? state.handoffNotes : [];
-  state.pending = Array.isArray(state.pending) ? state.pending : [];
+  delete state.pending;   // 3.3：攒下的话退役，黑匣子接替（升级时未说完的已迁进匣子）
   state.satisfactionPlateaus = state.satisfactionPlateaus && typeof state.satisfactionPlateaus === 'object'
     ? state.satisfactionPlateaus
     : {};
@@ -285,7 +284,6 @@ export function newState(now = new Date()) {
     nextDaytimeEmergenceAt: null,
     daytimeEmergenceUsage: {},
     pendingAwareness: null,
-    pending: [],
     satisfactionPlateaus: {},
     sessionOverlays: {},
     contextDeliveries: {},
@@ -469,9 +467,6 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
     }
   }
 
-  // pending_from_me 也是心潮时间结算的一部分：送达未回执要重试，
-  // consumed 宽限期和普通 72h 过期由同一颗心跳清理。held 始终不因时间丢失。
-  if (tickPending(state, now)) changed = true;
 
   // Fatigue: slowly recovers during sleep, slowly builds during prolonged high-drive wakefulness
   if (state.consciousness === 'sleeping') {

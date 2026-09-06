@@ -83,7 +83,10 @@
 - 新工具 `xinchao_box`（put / list / read / burn / keep）：只有 AI 能看的地方，秘密、备忘、纸条、事件都能放，可设到期。
   单独文件存（`BOX_STATE_PATH`），不进 state.json、不进 Dashboard、不进任何 HTTP 接口、不进 OB；上下文信封和"此刻"块只提一句"匣子里有 N 条"。
   人类问起来，说不说由 AI 定；AI 想让某条成为正式记忆用 keep 搬进 OB。审计只记时间、动作、id，不记内容。
-- `XINCHAO_TOOLS_HIDE`：从 tools/list 藏掉的工具（默认 pending 两个与 personality_stats），代码保留。
+- **攒下的话（pending_from_me）退役，黑匣子接替**：`xinchao_pending_create` / `xinchao_pending_consumed` 移除，`state.pending` 字段删除，
+  上下文信封不再有 `pending_from_me` 段；`put` 时带 `surface=true` 的匣子条目会在信封里露一行标题（正文仍需 AI 自己 read）。
+  升级时未说出口、未被放下的旧条目自动迁进匣子（memo，带 surface）。Dashboard `/dashboard/api/pending` GET 只回退役说明，PATCH 回 410；网页"留下/放下"页可下线。
+- `XINCHAO_TOOLS_HIDE`：从 tools/list 藏掉的工具（默认 personality_stats），代码保留。
 
 ### 白昼浮现 → 念头池
 

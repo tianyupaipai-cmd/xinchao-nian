@@ -4,7 +4,6 @@ import { emotionSummary, emotionNuance, renderEmotion, renderEmotionTrend } from
 import { renderAwareness } from './awareness.js';
 import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
 import { renderHandoffNotes } from './handoff-notes.js';
-import { renderPending, selectForDelivery } from './pending-queue.js';
 
 const VALID_MODES = new Set(['session_start', 'turn', 'inspect']);
 
@@ -206,6 +205,7 @@ export function buildContextEnvelope({
   timeZone = 'Asia/Shanghai',
   personalityAnchors = [],
   boxCount = 0,
+  boxSurfaced = [],
 }) {
   const normalizedMode = normalizeMode(mode);
   const tokenBudget = clamp(maxTokens, 200, 4000);
@@ -230,7 +230,8 @@ export function buildContextEnvelope({
   }
 
   const dynamic = dynamicSection(state, safeSessionId, generatedAt, timeZone);
-  const boxLine = boxCount > 0 ? `\n黑匣子里有 ${boxCount} 条，只有你能看（xinchao_box）` : '';
+  const surfacedLines = (Array.isArray(boxSurfaced) ? boxSurfaced : []).slice(0, 3).map((x) => `\n  · 你想提醒自己的：${compact(x.title)}（xinchao_box read ${x.id}）`).join('');
+  const boxLine = boxCount > 0 ? `\n黑匣子里有 ${boxCount} 条，只有你能看（xinchao_box）${surfacedLines}` : '';
   const sections = [
     {
       id: 'dynamic_state',
@@ -278,24 +279,6 @@ export function buildContextEnvelope({
       content: handoffText,
     });
   }
-  const pendingItems = selectForDelivery(state);
-  if (pendingItems.length) {
-    sections.push({
-      id: 'pending_from_me',
-      source: 'xinchao',
-      ttl: 'until-consumed',
-      content: renderPending(pendingItems),
-      data: {
-        ids: pendingItems.map((item) => item.id),
-        items: pendingItems.map((item) => ({
-          id: item.id,
-          kind: item.kind,
-          createdAt: item.createdAt,
-          content: item.content,
-        })),
-      },
-    });
-  }
   const continuity = compact(ombreText);
   if (continuity) {
     sections.push({
@@ -322,7 +305,6 @@ export function buildContextEnvelope({
     handoff_notes: '近期交接便签（非原文）',
     dream_residue: '梦境余韵',
     recent_continuity: '近期连续性（不替代基岩）',
-    pending_from_me: '我独处时攒下的话（说出后请回执）',
   };
   let remaining = tokenBudget;
   const renderedSections = [];
@@ -391,7 +373,7 @@ const CAUSE_LABEL = {
   task_progress: '推进了事', reflection: '沉淀过', conflict: '争执', loss: '失落', reconciliation: '和好',
 };
 
-export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0 } = {}) {
+export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0 } = {}) {
   const sanity = nowSanity(state, now);
   if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
   const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
@@ -424,11 +406,9 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   const extras = [];
   const open = (state.awareness?.candidates ?? []).filter((c) => c.status === 'open').length;
   if (open) { counts.awareness = open; extras.push(`${open} 条觉察等你认`); }
-  const pending = selectForDelivery(state).length;
-  if (pending) { counts.pending = pending; extras.push(`${pending} 句攒下的话没说`); }
   const dream = breathDreamContext(state, now, 18, 1);
   if (dream.available) { counts.dream = 1; extras.push('昨夜有梦'); }
-  if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条`); }
+  if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条${boxSurfaced > 0 ? `（${boxSurfaced} 条要提醒你）` : ''}`); }
   if (extras.length) lines.push(`另外：${extras.join('、')}。细的在 xinchao_context`);
 
   const text = lines.join('\n');

@@ -20,7 +20,7 @@ test('old schema state upgrades additively without resetting drives', () => {
   const result = settleState(old, new Date('2026-08-19T08:00:00.000Z'));
   assert.equal(result.state.schemaVersion, 9);
   assert.equal(result.state.drives.possess, 0.63);
-  assert.deepEqual(result.state.pending, []);
+  assert.equal('pending' in result.state, false);   // 3.3：攒下的话退役，字段被拿掉
   assert.deepEqual(result.state.satisfactionPlateaus, {});
 });
 
