@@ -3,7 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadConfig, validateConfig } from './config.js';
 import { emotionCoords, emotionSummary, stampEmotionArgs } from './emotion.js';
 import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
-import { detectSelfSignals } from './self-signals.js';
+import { detectSelfSignals, renderNowLine } from './self-signals.js';
 import { BlackBox, renderBoxList } from './black-box.js';
 import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour, applySurfacedThought, surfacedDriveKey } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
@@ -771,12 +771,24 @@ async function createContextEnvelope({
   try { personalityAnchors = (await personality.getPersonalityCore(now)).anchors ?? []; } catch { personalityAnchors = []; }
   let boxCount = 0; let boxSurfaced = [];
   try { boxCount = await blackBox.count(now); boxSurfaced = await blackBox.surfaced(now); } catch { boxCount = 0; boxSurfaced = []; }
+  // 官方客户端版：没被 Bridge 接走的自身信号，在这里带出去（带出即 delivered）；小屋 24h 内的来信只报条数。
+  let awaySignals = [];
+  if (config.bridge.enabled) {
+    try {
+      awaySignals = (await bridgeQueue.ready(now)).filter((d) => d.reason === 'self_signal').slice(-5)
+        .map((d) => ({ id: d.id, createdAt: d.createdAt, text: String(d.message ?? '').split('\n')[0] }));
+    } catch { awaySignals = []; }
+  }
+  let cabinRecent = 0;
+  try { cabinRecent = (await cabin.unlockedUserNotes()).filter((n) => now.getTime() - Date.parse(n.createdAt) < 24 * 3_600_000).length; } catch { cabinRecent = 0; }
   const envelope = buildContextEnvelope({
     state,
     sessionId,
     mode,
     boxCount,
     boxSurfaced,
+    awaySignals,
+    cabinRecent,
     ombreText,
     maxTokens,
     ttlMinutes: config.context.ttlMinutes,
@@ -787,6 +799,9 @@ async function createContextEnvelope({
     personalityAnchors,
   });
   if (envelope.delivered) {
+    for (const sig of awaySignals) {
+      try { await bridgeQueue.acknowledge(sig.id, 'delivered', '', now); } catch { /* 回执失败下次再带 */ }
+    }
     state = await updateState({
       type: 'context_delivery',
       source: 'context-adapter',
@@ -1267,6 +1282,24 @@ const server = createServer(async (request, response) => {
           return createContextEnvelope(args);
         },
         event: async (event) => {
+          // 官方客户端版：没填类型但给了 exchange → 服务端判（8 分钟内不重复判，和 PaiHome 钩子的节流一致）
+          if (!event.interactionType && event.exchange && config.model.enabled) {
+            const snapshot = await store.read();
+            const lastAt = Date.parse(snapshot.interactionClassifyAt ?? '');
+            if (!Number.isFinite(lastAt) || Date.now() - lastAt >= 8 * 60_000) {
+              try {
+                const tag = await model.classifyInteraction(event.exchange);
+                if (tag) {
+                  event.interactionType = tag.type;
+                  event.sessionState = { ...(event.sessionState ?? {}), tone: tag.tone, warmth: tag.warmth, tension: tag.tension };
+                  await updateState({ type: 'interaction_classified', source: 'mcp', details: { type: tag.type, tone: tag.tone }, at: new Date() },
+                    (current) => ({ ...current, interactionClassifyAt: new Date().toISOString() }));
+                  log('interaction_classified', { type: tag.type, tone: tag.tone });
+                }
+              } catch (error) { log('interaction_classify_failed', { message: error.message }); }
+            }
+          }
+          delete event.exchange;   // 正文只走那一跳，不进状态、不进审计
           const result = await recordConversationEvent(event, 'mcp');
           return {
             revision: result.revision,
@@ -1282,6 +1315,13 @@ const server = createServer(async (request, response) => {
         awareness: async (input) => handleAwareness(input),
         box: async (input) => handleBox(input),
         toolsHide: config.toolsHide,
+        // 每个 xinchao_* 工具回应末尾的"此刻"一行（官方客户端没有钩子，靠这个拿状态）
+        nowLine: async () => {
+          const state = await store.read();
+          let boxCount = 0; try { boxCount = await blackBox.count(new Date()); } catch { boxCount = 0; }
+          const line = renderNowLine(state, new Date());
+          return boxCount > 0 ? `${line}；匣子里 ${boxCount} 条` : line;
+        },
         personalityReflect: async (input) => personality.recordAiAssessment(input),
         personalityStats: async () => {
           const core = await personality.getPersonalityCore();

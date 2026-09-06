@@ -72,3 +72,15 @@ test('hidden tools disappear from tools/list', async () => {
   assert.ok(names.includes('xinchao_box'));
   assert.ok(!names.includes('xinchao_pending_create'));
 });
+
+test('xinchao_* tool replies carry a trailing now-line; xinchao_context does not', async () => {
+  const handlers = {
+    nowLine: async () => '此刻：想她（涌）；情绪 安心',
+    handoffNote: async () => ({ revision: 3, duplicate: false }),
+    context: async () => ({ delivered: true, additionalContext: 'ctx', sections: [] }),
+  };
+  const note = await handleMcpMessage(request('tools/call', { name: 'xinchao_handoff_note', arguments: { event_id: 'evt-000001', note: 'x', session_id: 's' } }), handlers);
+  assert.match(note.body.result.content[0].text, /此刻：想她（涌）/);
+  const ctx = await handleMcpMessage(request('tools/call', { name: 'xinchao_context', arguments: { session_id: 's' } }), handlers);
+  assert.doesNotMatch(ctx.body.result.content[0].text, /此刻：/);
+});

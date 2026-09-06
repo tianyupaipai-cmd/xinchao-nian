@@ -206,6 +206,8 @@ export function buildContextEnvelope({
   personalityAnchors = [],
   boxCount = 0,
   boxSurfaced = [],
+  awaySignals = [],
+  cabinRecent = 0,
 }) {
   const normalizedMode = normalizeMode(mode);
   const tokenBudget = clamp(maxTokens, 200, 4000);
@@ -232,12 +234,13 @@ export function buildContextEnvelope({
   const dynamic = dynamicSection(state, safeSessionId, generatedAt, timeZone);
   const surfacedLines = (Array.isArray(boxSurfaced) ? boxSurfaced : []).slice(0, 3).map((x) => `\n  · 你想提醒自己的：${compact(x.title)}（xinchao_box read ${x.id}）`).join('');
   const boxLine = boxCount > 0 ? `\n黑匣子里有 ${boxCount} 条，只有你能看（xinchao_box）${surfacedLines}` : '';
+  const cabinLine = cabinRecent > 0 ? `\n小屋 24 小时内有 ${cabinRecent} 条她的来信（xinchao_cabin_inbox）` : '';
   const sections = [
     {
       id: 'dynamic_state',
       source: 'xinchao',
       ttl: 'short',
-      content: renderDynamic(dynamic) + boxLine,
+      content: renderDynamic(dynamic) + boxLine + cabinLine,
       data: dynamic,
     },
   ];
@@ -268,6 +271,17 @@ export function buildContextEnvelope({
       source: 'xinchao',
       ttl: 'until-resolved',
       content: awarenessText,
+    });
+  }
+  // 你不在的时候：没被 Bridge 接走的自身信号（官方客户端版靠这段）。读过就算收到。
+  const away = (Array.isArray(awaySignals) ? awaySignals : []).filter((x) => x && compact(x.text)).slice(-5);
+  if (away.length) {
+    sections.push({
+      id: 'while_away',
+      source: 'xinchao',
+      ttl: 'once',
+      content: away.map((x) => `${String(x.createdAt ?? '').slice(5, 16).replace('T', ' ')}｜${compact(x.text)}`).join('\n'),
+      data: { ids: away.map((x) => x.id) },
     });
   }
   const handoffText = renderHandoffNotes(state, generatedAt, 3);
@@ -302,6 +316,7 @@ export function buildContextEnvelope({
     dynamic_state: '心潮动态状态',
     behavior_anchors: '行为锚点（我的底线，驱力再高也不越过）',
     self_awareness: '自我觉察候选（我最近的样子，不一定对）',
+    while_away: '你不在的时候（心潮记下的我自己的信号）',
     handoff_notes: '近期交接便签（非原文）',
     dream_residue: '梦境余韵',
     recent_continuity: '近期连续性（不替代基岩）',

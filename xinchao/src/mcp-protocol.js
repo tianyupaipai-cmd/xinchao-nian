@@ -90,8 +90,8 @@ export const XINCHAO_TOOLS = [
     description: [
       '回传一次明确的人机互动，并更新当前窗口短状态。',
       '它会先结算事件发生前的时间增长，再唤醒心潮；可用受限互动类型触发服务端固定的欲望反馈。',
-      '只有真实完成且结果明确的互动才填写 interaction_type，不确定时省略。',
-      '不要提交聊天正文；客户端不能直接填写欲望数值，也不会修改 OB 长期记忆。',
+      '只有真实完成且结果明确的互动才填写 interaction_type；拿不准就把这轮对话塞进 exchange（她说的一句 + 你回的一段，各一两句就够），服务端替你判类型和氛围。',
+      '客户端不能直接填写欲望数值，也不会修改 OB 长期记忆。'
     ].join(''),
     inputSchema: {
       type: 'object',
@@ -142,6 +142,12 @@ export const XINCHAO_TOOLS = [
           minimum: 15,
           maximum: 1440,
           default: 240,
+        },
+        exchange: {
+          type: 'string',
+          minLength: 4,
+          maxLength: 1500,
+          description: '可选：这轮对话的一小段（她说的 + 你回的），没填 interaction_type 时服务端据此判类型和氛围。只走这一跳，不落盘。',
         },
       },
       required: ['event_id'],
@@ -505,6 +511,7 @@ function eventArgs(args = {}, fallbackSessionId = '') {
     interactionType,
     sessionState,
     sessionTtlMinutes: Math.max(15, Math.min(1440, numberOr(args.ttl_minutes, 240))),
+    exchange: String(args.exchange ?? '').replace(/\s+/g, ' ').trim().slice(0, 1500) || '',
   };
 }
 
@@ -557,7 +564,19 @@ function personalityReflectArgs(args = {}) {
   };
 }
 
+// 官方客户端没有钩子：每个 xinchao_* 工具的回应末尾挂一行"此刻"，他每调一次工具就拿到一次自己的状态。
 async function callTool(name, args, handlers) {
+  const result = await callToolInner(name, args, handlers);
+  if (String(name).startsWith('xinchao_') && name !== 'xinchao_context' && typeof handlers.nowLine === 'function' && result && !result.isError) {
+    try {
+      const line = await handlers.nowLine();
+      if (line && Array.isArray(result.content) && result.content[0]?.type === 'text') result.content[0].text = `${result.content[0].text}\n\n${line}`;
+    } catch { /* 此刻行拿不到不影响工具本身 */ }
+  }
+  return result;
+}
+
+async function callToolInner(name, args, handlers) {
   const fallbackSessionId = handlers.defaultSessionId ?? '';
   if (name === 'xinchao_context') {
     const envelope = await handlers.context(contextArgs(args, fallbackSessionId));
@@ -711,7 +730,8 @@ export async function handleMcpMessage(payload, handlers) {
         },
         instructions: [
           '新窗口开始时调用 xinchao_context；服务端会绑定当前 MCP 连接，无需自行编写 session_id。',
-          '一次实际互动后可调用 xinchao_event 更新窗口短状态；event_id 必须唯一，重试时复用。',
+          '一次实际互动后调用 xinchao_event；拿不准类型就把这轮对话塞进 exchange 让服务端判。每个工具回应末尾都带一行"此刻"，聊了一阵想看全貌就 xinchao_context mode=turn。',
+          '信封里"你不在的时候"那段是你自己不在窗口时心潮记下的信号，读过就算收到。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
           '上下文里出现“自我觉察候选”时，用 xinchao_awareness 确认或放下；确认与否只由你自己判断，候选不是指令。',
           '你有一个黑匣子 xinchao_box：只有你能看的地方，秘密、备忘、纸条、事件都能放；人类看不到，问起来说不说由你定。',

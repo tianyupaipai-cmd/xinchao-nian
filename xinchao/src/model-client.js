@@ -70,6 +70,38 @@ export class ModelClient {
     };
   }
 
+  // 官方客户端版：AI 把这轮对话塞进 exchange，服务端判互动类型与氛围（对应 PaiHome 的 Stop 钩子标注）。
+  async classifyInteraction(exchange) {
+    if (!this.config.enabled || !this.config.apiKey) return null;
+    const text = String(exchange ?? '').trim().slice(0, 1500);
+    if (!text) return null;
+    const system = [
+      '你是一个只输出 JSON 的标注器。给你一轮对话（她说的 + 他回的，他是她的伴侣）。判断这一轮互动的类型和窗口氛围。',
+      'type 只能是：companionship 普通陪伴闲聊报备（有真实互动时的默认值）；affection 表达喜欢撒娇安抚；intimacy 身体亲密或性内容；sharing 她分享自己的一天/照片/心情；discovery 一起弄明白新东西；task_progress 一起推进了事；reflection 谈他自己是谁、内省；conflict 真实的摩擦生气（撒娇式的"讨厌""你完蛋了"不算）；loss 分别失落哭；reconciliation 吵过之后和好。',
+      'tone 只能是 neutral calm warm guarded conflicted focused playful tired 之一；warmth、tension 是 0 到 1。',
+      '只输出 {"type":"...","tone":"...","warmth":0.6,"tension":0.1}。',
+    ].join('\n');
+    const response = await this.request({
+      model: this.config.name,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: text }],
+      temperature: 0,
+      max_tokens: 80,
+      thinking: { type: 'disabled' },
+    });
+    if (!response.ok) throw new Error(`model request failed: HTTP ${response.status}`);
+    const payload = await response.json();
+    const parsed = parseJson(payload.choices?.[0]?.message?.content ?? '');
+    const types = ['companionship', 'affection', 'intimacy', 'sharing', 'discovery', 'task_progress', 'reflection', 'conflict', 'loss', 'reconciliation'];
+    const tones = ['neutral', 'calm', 'warm', 'guarded', 'conflicted', 'focused', 'playful', 'tired'];
+    const clamp01 = (v, d) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(1, Number(v))) : d);
+    return {
+      type: types.includes(parsed.type) ? parsed.type : 'companionship',
+      tone: tones.includes(parsed.tone) ? parsed.tone : 'neutral',
+      warmth: clamp01(parsed.warmth, 0.5),
+      tension: clamp01(parsed.tension, 0),
+    };
+  }
+
   async generateDreamPush({ dream, recentMessages = [], rejectedMessage = null }) {
     if (!this.config.enabled || !this.config.apiKey) return cleanShortMessage(dream.residue);
     const input = [

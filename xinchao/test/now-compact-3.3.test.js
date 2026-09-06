@@ -96,3 +96,13 @@ test('envelope and now-block mention the box count and surfaced titles only', ()
   const now = buildNowCompact(state, at(0), { boxCount: 2, boxSurfaced: 1 });
   assert.match(now.text, /匣子里 2 条（1 条要提醒你）/);
 });
+
+test('while_away section lists undelivered self signals and cabin line counts recent notes', () => {
+  const state = baseState();
+  const envelope = buildContextEnvelope({ state, sessionId: 's1', now: at(0), awaySignals: [{ id: 'd1', createdAt: '2026-09-06T02:10:00.000Z', text: '想她的劲儿两个小时没下去了。' }], cabinRecent: 2 });
+  const away = envelope.sections.find((s) => s.id === 'while_away');
+  assert.ok(away);
+  assert.match(away.content, /09-06 02:10｜想她的劲儿/);
+  assert.deepEqual(away.data.ids, ['d1']);
+  assert.match(envelope.sections[0].content, /小屋 24 小时内有 2 条她的来信/);
+});
