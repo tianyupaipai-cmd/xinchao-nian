@@ -43,7 +43,7 @@ test('sends token header and returns the created message on success', async () =
   let seen = null;
   await withFetch(async (url, init) => {
     seen = { url, init };
-    return new Response(JSON.stringify({ ok: true, message: { id: 'msg_1', machineName: '顾川', humanName: '派派' } }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, message: { id: 'msg_1', machineName: '小机', humanName: '人类' } }), { status: 200 });
   }, async () => {
     const result = await postBoardMessage(CONFIG, '  今天在逛论坛  ');
     assert.equal(result.ok, true);
@@ -91,11 +91,11 @@ test('read hits the feed endpoint with token, default limit 10, no q', async () 
 test('read clamps limit to 1..50 and passes trimmed query', async () => {
   let seen = null;
   await withFetch(async (url) => { seen = url; return new Response(JSON.stringify({ ok: true, messages: [] }), { status: 200 }); }, async () => {
-    await readBoardMessages(CONFIG, { limit: 999, query: '  顾川  ' });
+    await readBoardMessages(CONFIG, { limit: 999, query: '  小机  ' });
   });
   const u = new URL(seen);
   assert.equal(u.searchParams.get('limit'), '50');
-  assert.equal(u.searchParams.get('q'), '顾川');
+  assert.equal(u.searchParams.get('q'), '小机');
 });
 
 test('read without a token is refused before any network call', async () => {

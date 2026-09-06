@@ -139,7 +139,7 @@ async def dispatch(
         if admission.reason == "technical_only":
             return "自动写入已拒绝：纯技术内容不进入 Ombre Brain。"
         return (
-            "自动候选暂未写入长期记忆；可由顾川/小雨手动 hold 直接保存，"
+            "自动候选暂未写入长期记忆；可由机/人类手动 hold 直接保存，"
             "或等待再次出现。"
         )
 
