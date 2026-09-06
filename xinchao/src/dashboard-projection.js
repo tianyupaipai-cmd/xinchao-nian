@@ -85,7 +85,10 @@ function projectedDreams(state, includePrivateText, limit = 12) {
       hasSummary: Boolean(summary),
       hasAwareness: Boolean(compact(dream?.awareness)),
       lucidity,
+      // 3.3：醒来心情公开（只是两个数），意象随正文挂私密门
+      mood: dream?.mood && Number.isFinite(Number(dream.mood.valence)) ? { valence: Number(clamp(dream.mood.valence).toFixed(3)), arousal: Number(clamp(dream.mood.arousal).toFixed(3)) } : null,
       ...(includePrivateText ? {
+        image: compact(dream?.image, 24) || null,
         dream: compact(dream?.dream, 4000) || null,
         summary,
         residue: compact(dream?.residue, 1200) || null,
