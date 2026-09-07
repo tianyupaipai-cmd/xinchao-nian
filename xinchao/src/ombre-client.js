@@ -102,12 +102,18 @@ export class OmbreClient {
     return (await this.daytimeMaterialWithRefs(drives, emotion)).text;
   }
 
-  async daytimeMaterialWithRefs(drives = [], emotion = null) {
-    const result = await this.call('breath', {
+  // 2026-09-07 改：不再把一段"指令"当 query 发给 OB——检索会拿"记忆/浮现/想起"这些词去匹配讲记忆本身的旧条目，
+  // 还会命中已沉底的桶（查询道只认词，不认 dont_surface）。改走 breath_advanced 的浮现道：不传 query，
+  // OB 按权重给未解决的记忆，本来就尊重沉底/已消化；date_from 限最近两周；mode=automatic 表明是自动召回。
+  // 驱力标签不再拼进 query，只保留情绪坐标做共振排序。
+  async daytimeMaterialWithRefs(drives = [], emotion = null, now = new Date()) {
+    const result = await this.call('breath_advanced', {
       ...emotionArgs(emotion),
-      query: withDriveHint('白天自然浮现的近期记忆、具体细节、未说完的话和当下牵挂；不要返回系统配置或技术信息', drives),
+      date_from: daysAgo(now, RECENT_WINDOW_DAYS),
+      mode: 'automatic',
+      with_ids: true,
       max_results: this.config.breathMaxResults,
-      max_tokens: this.config.breathMaxTokens
+      max_tokens: 12000   // 核心准则段每次都在最前、单独就要六千上下，后面的浮现记忆得留出位置（只是字节，不过模型）
     });
     return materialWithRefs(extractText(result), 10000);
   }
@@ -117,12 +123,14 @@ export class OmbreClient {
     return (await this.thoughtMaterialWithRefs(drives, emotion)).text;
   }
 
-  async thoughtMaterialWithRefs(drives = [], emotion = null) {
-    const result = await this.call('breath', {
+  async thoughtMaterialWithRefs(drives = [], emotion = null, now = new Date()) {
+    const result = await this.call('breath_advanced', {
       ...emotionArgs(emotion),
-      query: withDriveHint('此刻自然想起的一件具体的事：最近的共同经历、说过的话或还惦记着的东西；不要返回系统配置、部署或技术信息', drives),
+      date_from: daysAgo(now, RECENT_WINDOW_DAYS),
+      mode: 'automatic',
+      with_ids: true,
       max_results: Math.max(1, Math.min(3, Number(this.config.breathMaxResults) || 2)),
-      max_tokens: Math.max(200, Math.min(600, Number(this.config.breathMaxTokens) || 400))
+      max_tokens: 9000
     });
     return materialWithRefs(extractText(result), 4000);
   }
@@ -158,9 +166,9 @@ export class OmbreClient {
   async farMaterial(now = new Date()) {
     const dateTo = new Date(now.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
     // OB 3.6：日期过滤只在 breath_advanced 上（公开 breath 不收 date_to）
+    // 同上：不传 query 走浮现道，只用 date_to 把窗口推到 30 天以前
     const result = await this.call('breath_advanced', {
-      query: '很久以前的一件具体的小事，有画面、有身体感；不要系统配置或技术信息',
-      max_results: 1, max_tokens: 1200, date_to: dateTo, with_ids: true,
+      mode: 'automatic', max_results: 1, max_tokens: 10000, date_to: dateTo, with_ids: true,
     });
     return materialWithRefs(extractText(result), 1500);
   }
@@ -403,8 +411,24 @@ export function parseSurfacedBucketIds(text) {
   return ids;
 }
 
+const RECENT_WINDOW_DAYS = 14;
+function daysAgo(now, days) { return new Date(now.getTime() - days * 86_400_000).toISOString().slice(0, 10); }
+
+// 把 OB 输出里不该当原料的块去掉：已沉底（"已删除到档案"）的桶、with_ids 追加的 json 尾块、预算不足提示行。
+// 也去掉"核心准则"段：那是行为底线不是记忆，每次都排在最前且很占预算；浮现原料只从"浮现记忆/久未浮现"段取。
+export function cleanSurfacedText(text) {
+  const body = String(text ?? '').split('=== ombre:result-ids ===')[0];
+  // 段标题（=== 浮现记忆 === 这类）前面没有分隔线，会和上一段最后一桶粘在一起，所以按标题也切
+  return body.split(/\n---\n|\n(?==== )/)
+    .map((block) => block.replace(/^===[^\n]*===\s*$/gm, '').replace(/^\[?token 预算不足[^\n]*\n?/gm, '').trim())
+    .filter((block) => block && !/已删除到档案|已退出日常记忆|\[核心准则\]/.test(block))
+    // 技术/事务类主题域不当浮现原料（和梦的原料同一份排除表）：他白天想起的应该是人和事，不是部署
+    .filter((block) => !(((block.match(/\[domain:([^\]]+)\]/) || [])[1] || '').split(/[,，]/).some((d) => DREAM_EXCLUDE_DOMAINS.has(d.trim()))))
+    .join('\n---\n');
+}
+
 export function materialWithRefs(text, maxChars = 10000) {
-  const limited = String(text ?? '').slice(0, Math.max(0, Number(maxChars) || 0));
+  const limited = cleanSurfacedText(text).slice(0, Math.max(0, Number(maxChars) || 0));
   return {
     text: limited,
     bucketIds: parseSurfacedBucketIds(limited),
