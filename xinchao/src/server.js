@@ -857,6 +857,29 @@ async function createContextEnvelope({
   return ombreWarning ? { ...envelope, warnings: [ombreWarning] } : envelope;
 }
 
+// 没填类型但给了 exchange（她的一句 + 他的一段）→ 服务端替接收端判互动类型和氛围。
+// MCP（官方客户端版）和 REST /v1/conversation-event（自建运行时）共用；8 分钟内不重复判，和 PaiHome 钩子的节流一致。
+// exchange 正文只走这一跳：判完即删，不进状态、不进审计。
+async function classifyExchange(event, source = 'api') {
+  if (event.interactionType === undefined && event.interaction_type !== undefined) event.interactionType = event.interaction_type;
+  const exchange = String(event.exchange ?? '').replace(/\s+/g, ' ').trim().slice(0, 1500);
+  delete event.exchange;
+  if (event.interactionType || !exchange || !config.model.enabled) return null;
+  const snapshot = await store.read();
+  const lastAt = Date.parse(snapshot.interactionClassifyAt ?? '');
+  if (Number.isFinite(lastAt) && Date.now() - lastAt < 8 * 60_000) return { skipped: 'throttled' };
+  try {
+    const tag = await model.classifyInteraction(exchange);
+    if (!tag) return null;
+    event.interactionType = tag.type;
+    event.sessionState = { ...(event.sessionState ?? event.session_state ?? {}), tone: tag.tone, warmth: tag.warmth, tension: tag.tension };
+    await updateState({ type: 'interaction_classified', source, details: { type: tag.type, tone: tag.tone }, at: new Date() },
+      (current) => ({ ...current, interactionClassifyAt: new Date().toISOString() }));
+    log('interaction_classified', { type: tag.type, tone: tag.tone, source });
+    return { type: tag.type, tone: tag.tone };
+  } catch (error) { log('interaction_classify_failed', { message: error.message }); return null; }
+}
+
 async function recordConversationEvent(event, source = 'api', now = new Date()) {
   let applied;
   const auditDetails = {};
@@ -1296,24 +1319,7 @@ const server = createServer(async (request, response) => {
           return createContextEnvelope(args);
         },
         event: async (event) => {
-          // 官方客户端版：没填类型但给了 exchange → 服务端判（8 分钟内不重复判，和 PaiHome 钩子的节流一致）
-          if (!event.interactionType && event.exchange && config.model.enabled) {
-            const snapshot = await store.read();
-            const lastAt = Date.parse(snapshot.interactionClassifyAt ?? '');
-            if (!Number.isFinite(lastAt) || Date.now() - lastAt >= 8 * 60_000) {
-              try {
-                const tag = await model.classifyInteraction(event.exchange);
-                if (tag) {
-                  event.interactionType = tag.type;
-                  event.sessionState = { ...(event.sessionState ?? {}), tone: tag.tone, warmth: tag.warmth, tension: tag.tension };
-                  await updateState({ type: 'interaction_classified', source: 'mcp', details: { type: tag.type, tone: tag.tone }, at: new Date() },
-                    (current) => ({ ...current, interactionClassifyAt: new Date().toISOString() }));
-                  log('interaction_classified', { type: tag.type, tone: tag.tone });
-                }
-              } catch (error) { log('interaction_classify_failed', { message: error.message }); }
-            }
-          }
-          delete event.exchange;   // 正文只走那一跳，不进状态、不进审计
+          await classifyExchange(event, 'mcp');
           const result = await recordConversationEvent(event, 'mcp');
           return {
             revision: result.revision,
@@ -1426,7 +1432,9 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && (url.pathname === '/v1/conversation-event' || url.pathname === '/v1/heartbeat')) {
       const event = await body(request);
       const source = url.pathname === '/v1/heartbeat' ? 'heartbeat' : 'api';
-      return send(response, 200, await recordConversationEvent(event, source));
+      const classified = source === 'heartbeat' ? null : await classifyExchange(event, 'api');
+      const result = await recordConversationEvent(event, source);
+      return send(response, 200, classified?.type ? { ...result, classified } : result);
     }
     if (request.method === 'POST' && url.pathname === '/v1/handoff-note') {
       const payload = await body(request);
