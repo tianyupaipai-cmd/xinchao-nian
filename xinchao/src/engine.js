@@ -165,6 +165,13 @@ function applyInteractionOutcome(state, type, now, options = {}) {
     state.drives[key] = Number(clamp(current + clamp(Number(increase), 0, 0.12)).toFixed(4));
     affected.add(key);
   }
+  // 3.3.1 记得在气什么：冲突时把她那句留下来（≤60 字，随生气一起退），和好就翻篇。
+  // 以前生气只是个数字，他知道自己在气却不知道为什么。
+  if (type === 'conflict' && options.cause) {
+    const cause = String(options.cause).replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (cause) state.grudge = { cause, at: now.toISOString() };
+  }
+  if (type === 'reconciliation' && state.grudge) delete state.grudge;
   state.interactionUsage[day] = used + 1;
   state.interactionUsage = Object.fromEntries(
     Object.entries(state.interactionUsage).sort(([left], [right]) => right.localeCompare(left)).slice(0, 14),
@@ -422,6 +429,7 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
       const next = Number(clamp(current * Math.pow(0.5, elapsedHours / dim.decayHalfLifeHours)).toFixed(4));
       if (next !== current) changed = true;
       state.drives[key] = next;
+      if (key === 'anger' && next < 0.03 && state.grudge) { delete state.grudge; changed = true; }   // 气消了就忘了在气什么
       continue;
     }
     // 时间地板 = 每个驱力向自己的静息天花板生长；被事件/共振/回流顶到之上就慢慢松弛回来。
@@ -549,7 +557,7 @@ export function applyConversationEvent(input, event = {}, now = new Date(), opti
       reasonCode: 'missing_event_id',
       affectedDrives: [],
     }
-    : applyInteractionOutcome(state, type, now, options);
+    : applyInteractionOutcome(state, type, now, { ...options, cause: event.cause });
 
   // 情绪层：互动事件打一次脉冲（和驱力效果同一道日限门），会话 tone 把情绪往落点拉一小段。
   if (interaction.applied && INTERACTION_EMOTION[type]) applyEmotionImpulse(state, INTERACTION_EMOTION[type], type, now);

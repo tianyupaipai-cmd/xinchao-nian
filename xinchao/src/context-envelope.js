@@ -80,6 +80,7 @@ function thoughtSignals(state) {
 
 function dynamicSection(state, sessionId, now, timeZone) {
   return {
+    grudge: grudgeLine(state, now instanceof Date ? now : new Date(now)),
     consciousness: state.consciousness,
     fatigue: Number(Number(state.fatigue ?? 0).toFixed(3)),
     topDrives: topDrives(state, 4).map((drive) => ({
@@ -141,6 +142,7 @@ function renderDynamic(value) {
     .map((item) => `${item.key}:${item.intensity.toFixed(3)}`)
     .join('，');
   if (obsessions) parts.push(`持续念头：${obsessions}`);
+  if (value.grudge) parts.push(value.grudge);
   return parts.join('\n');
 }
 
@@ -388,6 +390,16 @@ const CAUSE_LABEL = {
   task_progress: '推进了事', reflection: '沉淀过', conflict: '争执', loss: '失落', reconciliation: '和好',
 };
 
+// 还在气什么（3.3.1）：冲突时留下的她那句话，生气没退到 0.12 以下就带出来；和好或气消了自动没了。
+export function grudgeLine(state, now = new Date()) {
+  const g = state?.grudge;
+  if (!g?.cause || Number(state?.drives?.anger ?? 0) < 0.12) return '';
+  const hours = (now.getTime() - Date.parse(g.at ?? '')) / 3_600_000;
+  if (!Number.isFinite(hours) || hours < 0) return '';
+  const when = hours < 1 ? '刚才' : hours < 24 ? `${Math.round(hours)} 小时前` : `${Math.round(hours / 24)} 天前`;
+  return `还在气：${when}为了「${g.cause}」`;
+}
+
 export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0 } = {}) {
   const sanity = nowSanity(state, now);
   if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
@@ -408,6 +420,8 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   const trend = path.length >= 2 ? `；近一天走过 ${path.length > 5 ? '…' : ''}${path.slice(-5).join('→')}` : '';
   lines.push(`情绪：${emotionNuance(state, now)}${cause ? `；刚才${cause}` : ''}${trend}`);
   }
+  const grudge = grudgeLine(state, now);
+  if (grudge) lines.push(grudge);
 
   const longing = computeLonging(state, now, { timeZone });
   const longingLine = renderLonging(Number(longing ?? 0));

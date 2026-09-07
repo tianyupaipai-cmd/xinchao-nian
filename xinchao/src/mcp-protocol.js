@@ -143,6 +143,11 @@ export const XINCHAO_TOOLS = [
           maximum: 1440,
           default: 240,
         },
+        cause: {
+          type: 'string',
+          maxLength: 120,
+          description: '可选，只配合 interaction_type=conflict：她那句让你不痛快的话（≤60 字）。心潮会记着在气什么，和好或气消了自动忘。',
+        },
         exchange: {
           type: 'string',
           minLength: 4,
@@ -514,6 +519,7 @@ function eventArgs(args = {}, fallbackSessionId = '') {
     sessionState,
     sessionTtlMinutes: Math.max(15, Math.min(1440, numberOr(args.ttl_minutes, 240))),
     exchange: String(args.exchange ?? '').replace(/\s+/g, ' ').trim().slice(0, 1500) || '',
+    cause: String(args.cause ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || undefined,
   };
 }
 

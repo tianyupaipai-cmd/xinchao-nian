@@ -862,6 +862,8 @@ async function createContextEnvelope({
 // exchange 正文只走这一跳：判完即删，不进状态、不进审计。
 async function classifyExchange(event, source = 'api') {
   if (event.interactionType === undefined && event.interaction_type !== undefined) event.interactionType = event.interaction_type;
+  // cause：她那句让他不痛快的话（≤60 字），只在冲突时有意义；接收端可以直接给，也可以由 exchange 里截出来
+  event.cause = String(event.cause ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || undefined;
   const exchange = String(event.exchange ?? '').replace(/\s+/g, ' ').trim().slice(0, 1500);
   delete event.exchange;
   if (event.interactionType || !exchange || !config.model.enabled) return null;
@@ -873,6 +875,10 @@ async function classifyExchange(event, source = 'api') {
     if (!tag) return null;
     event.interactionType = tag.type;
     event.sessionState = { ...(event.sessionState ?? event.session_state ?? {}), tone: tag.tone, warmth: tag.warmth, tension: tag.tension };
+    if (tag.type === 'conflict' && !event.cause) {
+      const her = exchange.match(/她说：(.+?)(?:\s*他回：|$)/);
+      if (her) event.cause = her[1].trim().slice(0, 60);
+    }
     await updateState({ type: 'interaction_classified', source, details: { type: tag.type, tone: tag.tone }, at: new Date() },
       (current) => ({ ...current, interactionClassifyAt: new Date().toISOString() }));
     log('interaction_classified', { type: tag.type, tone: tag.tone, source });
