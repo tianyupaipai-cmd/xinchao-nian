@@ -403,7 +403,9 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   if (sanity.emotionOk) {
   const cause = emotion.lastCause && Date.parse(emotion.lastCauseAt ?? '') >= now.getTime() - 6 * 3_600_000
     ? (CAUSE_LABEL[emotion.lastCause] ?? emotion.lastCause) : '';
-  const trend = emotion.trend && emotion.trend.labels.length >= 2 ? `；近一天走过 ${emotion.trend.labels.join('→')}` : '';
+  // 近一天的情绪路径：去掉连着重复的，只留最后 5 步——之前把 19 步全列出来，此刻块一半是箭头
+  const path = (emotion.trend?.labels || []).filter((l, i, a) => i === 0 || l !== a[i - 1]);
+  const trend = path.length >= 2 ? `；近一天走过 ${path.length > 5 ? '…' : ''}${path.slice(-5).join('→')}` : '';
   lines.push(`情绪：${emotionNuance(state, now)}${cause ? `；刚才${cause}` : ''}${trend}`);
   }
 
