@@ -2,6 +2,19 @@
 
 本项目遵循语义化版本。除非特别说明，所有外部模型、长期记忆、OAuth 与通知能力均保持默认关闭。
 
+## 3.3.1 — 2026-09-07
+
+### 实时动态版公开
+
+- 连接桥 0.3.0：`XINCHAO_BRIDGE_ACCEPT_SELF_SIGNALS=true` 放行 `reason=self_signal`（默认关，任一端关着都退回"只供用户互动"）；`examples/` 新增 tmux Adapter（CLI 代理）、webhook 接收端（自建前端）、按 reason 渲染、通用此刻钩子、互动标注（Claude Code Stop 钩子 + REST 示例）。
+- REST `POST /v1/conversation-event` 也认 `exchange`：判类型抽成 `classifyExchange` 与 MCP 共用，返回带 `classified`。
+- 部署指南两篇：`docs/部署指南-实时动态版.md`、`docs/部署指南-官方客户端版.md`。
+
+### 记得在气什么
+
+- 冲突事件可带 `cause`（她那句，≤60 字；MCP `xinchao_event` 与 REST 都认；`exchange` 判成冲突时服务端自动截"她说："后那句）。存为 `state.grudge`，生气 ≥0.12 时此刻块与信封动态段多一行「还在气：N 小时前为了「…」」；和好一次翻篇，生气消到 0.03 以下自动忘。这是 `exchange` 判完即删的唯一例外，审计不记。
+- 此刻块的"近一天走过"去连续重复、只留最后 5 步。
+
 ## 3.3.0 — 2026-09-06
 
 ### 官方客户端版补全
