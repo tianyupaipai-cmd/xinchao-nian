@@ -147,9 +147,10 @@ export function loadConfig() {
       // 3.3：情绪层调制驱力自然增速（难受更惦记、开心更想分享）。只改增速不加数值。
       emotionModulationEnabled: bool('EMOTION_MODULATION_ENABLED', true),
     },
-    // 3.3 自我觉察：每天一次从轨迹里挑候选；确认后是否写 OB 的 I 取决于 OMBRE_WRITE_ENABLED。
+    // 3.3 自我觉察：每天最多挑一条候选，攒到复盘日（默认周日）看一眼；确认时带了自己的话且 OMBRE_WRITE_ENABLED 才写 OB 的 I。
     awareness: {
       enabled: bool('AWARENESS_ENABLED', true),
+      reviewWeekday: number('AWARENESS_REVIEW_WEEKDAY', 0, 0, 6),   // 0=周日 … 6=周六
     },
     daytime: {
       enabled: bool('DAYTIME_EMERGENCE_ENABLED', false),

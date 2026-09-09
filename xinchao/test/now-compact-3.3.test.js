@@ -31,8 +31,11 @@ test('extras line appears only when something is waiting; sleeping/just-woke lin
   const quiet = buildNowCompact(baseState(), at(0));
   assert.doesNotMatch(quiet.text, /另外/);
   const state = baseState();
-  state.awareness.candidates.push({ id: 'x', kind: 'mood_week', subject: 'low', text: 't', status: 'open', createdAt: T0 });
-  const withAwareness = buildNowCompact(state, at(0));
+  state.awareness.candidates.push({ id: 'x', kind: 'trigger', subject: 'conflict', text: 't', status: 'open', createdAt: T0 });
+  // at(0) = 2026-09-05 是周六：默认（周日复盘）不提；把复盘日设成周六才提
+  const weekday = buildNowCompact(state, at(0));
+  assert.doesNotMatch(weekday.text, /觉察等你认/);
+  const withAwareness = buildNowCompact(state, at(0), { awarenessReviewWeekday: 6 });
   assert.match(withAwareness.text, /另外：1 条觉察等你认。细的在 xinchao_context/);
   assert.equal(withAwareness.counts.awareness, 1);
   const asleep = settleState(baseState(), at(3)).state;

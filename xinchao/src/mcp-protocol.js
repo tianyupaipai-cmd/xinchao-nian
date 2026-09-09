@@ -177,9 +177,9 @@ export const XINCHAO_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'confirm', 'dismiss', 'scan', 'retry_ombre'], description: '默认 list。retry_ombre：把已确认但当时没写进 OB 的条目补写一次。' },
+        action: { type: 'string', enum: ['list', 'confirm', 'dismiss', 'scan'], description: '默认 list。' },
         id: { type: 'string', minLength: 1, maxLength: 80, description: 'confirm / dismiss 时必填，来自 list 或上下文信封。' },
-        text: { type: 'string', minLength: 1, maxLength: 400, description: 'confirm 时可选：用我自己的话重写这条觉察。' },
+        text: { type: 'string', minLength: 1, maxLength: 400, description: 'confirm 时可选：用我自己的话写一句。写了这句才会进 OB；不写只在心潮记一笔确认。' },
         note: { type: 'string', minLength: 1, maxLength: 400, description: '可选补充。' },
         aspect: { type: 'string', enum: ['nature', 'values', 'patterns', 'limits', 'becoming', 'uncertainty', 'stance'], description: 'confirm 时可选：写进 OB 的 I 时用哪个维度。' },
       },
@@ -615,14 +615,9 @@ async function callToolInner(name, args, handlers) {
         : ['（暂无候选）'];
       return toolText(`待我确认的觉察 ${result.open.length} 条；已确认 ${result.confirmed.length} 条。\n${lines.join('\n')}`, result);
     }
-    if (result.action === 'retry_ombre') {
-      const n = result.retried?.length ?? 0;
-      const okN = (result.retried ?? []).filter((r) => r.ok).length;
-      return toolText(n ? `补写 OB：${okN}/${n} 条成功${okN < n ? `，失败：${result.retried.filter((r) => !r.ok).map((r) => r.id).join('、')}` : ''}` : `没有需要补写的条目${result.reason ? `（${result.reason}）` : ''}`, result);
-    }
     if (!result.found) return toolText(`没有这条候选：${result.id}`, result);
     if (result.already) return toolText(`这条早已${result.already === 'confirmed' ? '确认' : '放下'}：${result.id}`, result);
-    const ob = result.ombre ? (result.ombre.ok ? '，已写入 OB 的 I（候选，待 dream 见证）' : `，OB 写入失败：${result.ombre.error}`) : '';
+    const ob = result.ombre ? (result.ombre.ok ? '，你的话已写入 OB 的 I（候选，待 dream 见证）' : `，OB 写入失败：${result.ombre.error}`) : (result.action === 'confirm' ? '（只记在心潮；想留进 OB 就带一句自己的话 text）' : '');
     return toolText(`${result.action === 'confirm' ? '已确认' : '已放下'}：${result.item.text}${ob}`, result);
   }
   if (name === 'xinchao_handoff_note') {

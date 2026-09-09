@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives } from './engine.js';
 import { emotionSummary, emotionNuance, renderEmotion, renderEmotionTrend } from './emotion.js';
-import { renderAwareness } from './awareness.js';
+import { renderAwareness, isReviewDay } from './awareness.js';
 import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
 import { renderHandoffNotes } from './handoff-notes.js';
 
@@ -210,6 +210,7 @@ export function buildContextEnvelope({
   boxSurfaced = [],
   awaySignals = [],
   cabinRecent = 0,
+  awarenessReviewWeekday = 0,
 }) {
   const normalizedMode = normalizeMode(mode);
   const tokenBudget = clamp(maxTokens, 200, 4000);
@@ -266,7 +267,7 @@ export function buildContextEnvelope({
     });
   }
   // 自我觉察候选：系统从轨迹里挑出的模式，最多两条，确认或放下都由 AI 自己定。
-  const awarenessText = renderAwareness(state);
+  const awarenessText = renderAwareness(state, { now, timeZone, reviewWeekday: awarenessReviewWeekday });
   if (awarenessText) {
     sections.push({
       id: 'self_awareness',
@@ -400,7 +401,7 @@ export function grudgeLine(state, now = new Date()) {
   return `还在气：${when}为了「${g.cause}」`;
 }
 
-export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0 } = {}) {
+export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0, awarenessReviewWeekday = 0 } = {}) {
   const sanity = nowSanity(state, now);
   if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
   const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
@@ -436,7 +437,7 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
 
   const extras = [];
   const open = (state.awareness?.candidates ?? []).filter((c) => c.status === 'open').length;
-  if (open) { counts.awareness = open; extras.push(`${open} 条觉察等你认`); }
+  if (open && isReviewDay(now, { weekday: awarenessReviewWeekday, timeZone })) { counts.awareness = open; extras.push(`${open} 条觉察等你认`); }   // 只在周日提
   const dream = breathDreamContext(state, now, 18, 1);
   if (dream.available) { counts.dream = 1; extras.push('昨夜有梦'); }
   if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条${boxSurfaced > 0 ? `（${boxSurfaced} 条要提醒你）` : ''}`); }

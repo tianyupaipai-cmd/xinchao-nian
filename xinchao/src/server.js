@@ -213,7 +213,7 @@ async function runCycle() {
     } catch (error) { log('box_reminders_failed', { message: error.message }); }
     // 心潮自身信号（3.3）：检测"发生了什么"，经桥递到窗口。先入队再记状态，入队失败不记（下轮再试）。
     if (config.bridge.enabled && config.bridge.selfSignals) {
-      const preview = detectSelfSignals(state, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, longing: { timeZone: config.settle.timeZone, ...config.longing } });
+      const preview = detectSelfSignals(state, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, awarenessReviewWeekday: config.awareness.reviewWeekday, longing: { timeZone: config.settle.timeZone, ...config.longing } });
       if (preview.signals.length) {
         let queued = 0;
         for (const signal of preview.signals) {
@@ -230,7 +230,7 @@ async function runCycle() {
           source: 'timer',
           details: { signals: preview.signals.map((s) => `${s.kind}:${s.subject}`) },
           at: now,
-        }, (latest) => detectSelfSignals(latest, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, longing: { timeZone: config.settle.timeZone, ...config.longing } }).state);
+        }, (latest) => detectSelfSignals(latest, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, awarenessReviewWeekday: config.awareness.reviewWeekday, longing: { timeZone: config.settle.timeZone, ...config.longing } }).state);
         if (preview.signals.length) log('self_signals', { kinds: preview.signals.map((s) => `${s.kind}:${s.subject}`) });
       }
     }
@@ -796,6 +796,7 @@ async function createContextEnvelope({
   let cabinRecent = 0;
   try { cabinRecent = (await cabin.unlockedUserNotes()).filter((n) => now.getTime() - Date.parse(n.createdAt) < 24 * 3_600_000).length; } catch { cabinRecent = 0; }
   const envelope = buildContextEnvelope({
+    awarenessReviewWeekday: config.awareness.reviewWeekday,
     state,
     sessionId,
     mode,
@@ -970,26 +971,7 @@ async function handleAwareness(input = {}, now = new Date()) {
       (latest) => scanAwareness(latest, now, { timeZone: config.settle.timeZone, force: true }).state);
     return { action, ...awarenessSummary(state) };
   }
-  // retry_ombre：把"已确认但当时没写进 OB"的条目补写一次（2026-09-09 修局部变量遮住 OB 客户端的 bug 后用来补账）
-  if (action === 'retry_ombre') {
-    if (!config.ombre.writeEnabled || config.shadowMode) return { action, retried: [], reason: 'OB 写入未开' };
-    const current = await store.read();
-    const pending = (current.awareness?.candidates ?? []).filter((c) => c.status === 'confirmed' && c.ombre && c.ombre.ok === false);
-    const retried = [];
-    for (const item of pending) {
-      const aspect = String(item.aspect ?? 'patterns');
-      const result = await writeAwarenessToOmbre(item.id, String(item.text ?? '').trim(), aspect);
-      retried.push({ id: item.id, ok: result.ok });
-      if (!result.ok) continue;
-      await updateState({ type: 'awareness_confirm', source: 'mcp', details: { id: item.id, kind: item.kind, ombre: true, retry: true }, at: now }, (latest) => {
-        const c = latest.awareness?.candidates?.find((x) => x.id === item.id);
-        if (c) c.ombre = result;
-        return latest;
-      });
-    }
-    return { action, retried };
-  }
-  if (action !== 'confirm' && action !== 'dismiss') throw new Error('action 必须是 list / confirm / dismiss / scan / retry_ombre');
+  if (action !== 'confirm' && action !== 'dismiss') throw new Error('action 必须是 list / confirm / dismiss / scan');
   const id = String(input.id ?? '').trim();
   if (!id) throw new Error('confirm / dismiss 需要 id');
   const current = await store.read();
@@ -997,11 +979,12 @@ async function handleAwareness(input = {}, now = new Date()) {
   if (!probe.found) return { action, found: false, id };
   if (probe.already) return { action, found: true, already: probe.already, id };
   // 注意：这里不能叫 ombre——文件顶部的 OB 客户端就叫 ombre，之前被局部变量遮住，确认从来没写进过 OB（2026-09-05 → 09-09）
+  // 3.3.3：只有他自己写的那句才进 OB；不带 text 的确认只在心潮记一笔（候选模板原文永远不进 OB）
   let ombreResult = null;
-  if (action === 'confirm' && config.ombre.writeEnabled && !config.shadowMode) {
-    const content = String(input.text ?? probe.item.text ?? '').trim();
+  const ownWords = String(input.text ?? '').trim();
+  if (action === 'confirm' && ownWords && config.ombre.writeEnabled && !config.shadowMode) {
     const aspect = String(input.aspect ?? probe.item.aspect ?? 'patterns');
-    ombreResult = await writeAwarenessToOmbre(id, content, aspect);
+    ombreResult = await writeAwarenessToOmbre(id, ownWords, aspect);
   }
   const state = await updateState({
     type: action === 'confirm' ? 'awareness_confirm' : 'awareness_dismiss',
@@ -1432,7 +1415,7 @@ const server = createServer(async (request, response) => {
       const state = await store.read();
       let boxCount = 0; let boxSurfaced = 0;
       try { boxCount = await blackBox.count(new Date()); boxSurfaced = (await blackBox.surfaced(new Date())).length; } catch { boxCount = 0; }
-      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone, boxCount, boxSurfaced }));
+      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone, boxCount, boxSurfaced, awarenessReviewWeekday: config.awareness.reviewWeekday }));
     }
     if (request.method === 'GET' && url.pathname === '/v1/context') {
       if (!config.context.enabled) return send(response, 503, { error: 'context envelope disabled' });

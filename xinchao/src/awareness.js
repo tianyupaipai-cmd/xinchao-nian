@@ -7,6 +7,10 @@
 // 之后还要被 dream 见证才升正式条目——那是 OB 的规矩，这里不越过）。
 // 放下的也留着记录，七天内同一个模式不再重复提。
 //
+// 3.3.3（2026-09-09 小雨定）：只留三种有因果的候选（触发 / 被安抚 / 念头），纯计数的（本周均值、
+// 最常冒头的驱力、记忆绕着哪个域）砍掉——那些是统计不是觉察。每天最多挑一条，一周攒下来周日看一次；
+// 他写了自己的话才进 OB，不写只记"看过"；两周没人理自动过期。不强迫。
+//
 // 这层不改驱力、不改情绪、不改人格。它只是把镜子举起来。人格怎么改、锚点加不加，
 // 由他月评时对着这些觉察自己定。
 
@@ -16,6 +20,9 @@ const iso = (value) => new Date(value).toISOString();
 const round2 = (value) => Number(Number(value).toFixed(2));
 const WINDOW_DAYS = 7;
 const MAX_OPEN = 8;
+const MAX_PER_DAY = 1;
+const EXPIRE_DAYS = 14;
+const RULE_PRIORITY = ['trigger', 'obsession', 'soothed'];   // 一天只挑一条时的先后
 const MAX_KEEP = 60;
 const MAX_SURFACINGS = 200;
 const DEDUPE_DAYS = 7;
@@ -28,7 +35,7 @@ const TYPE_LABEL = {
 };
 // 候选默认落到 OB I 的哪个维度：nature/values/patterns/limits/becoming/uncertainty/stance
 export const KIND_ASPECT = Object.freeze({
-  mood_week: 'patterns', trigger: 'patterns', soothed: 'patterns', drive_top: 'nature', obsession: 'patterns', memory_loop: 'patterns',
+  trigger: 'patterns', soothed: 'patterns', obsession: 'patterns',
 });
 
 function dayKey(at, timeZone = 'Asia/Shanghai') {
@@ -67,17 +74,7 @@ function labelOf(driveKey) {
   return DIMENSIONS[driveKey]?.label ?? driveKey;
 }
 
-// ── 规则 ─────────────────────────────────────────────────────────
-function ruleMoodWeek(state, now) {
-  const since = windowSince(now);
-  const days = Object.entries(state.emotionDays ?? {}).filter(([key]) => Date.parse(`${key}T12:00:00+08:00`) >= since);
-  if (days.length < 3) return [];
-  const mean = days.reduce((sum, [, d]) => sum + Number(d.meanValence ?? 0.5), 0) / days.length;
-  if (mean <= 0.42) return [{ kind: 'mood_week', subject: 'low', text: `这一周我整体偏低落，${days.length} 天里愉悦均值只有 ${round2(mean)}。`, evidence: { days: days.length, meanValence: round2(mean) } }];
-  if (mean >= 0.66) return [{ kind: 'mood_week', subject: 'high', text: `这一周我大多时候是安心的，${days.length} 天愉悦均值 ${round2(mean)}。`, evidence: { days: days.length, meanValence: round2(mean) } }];
-  return [];
-}
-
+// ── 规则（只留有因果的三种）─────────────────────────────────────
 function ruleTriggers(state, now) {
   const since = windowSince(now);
   const samples = (state.emotionJournal ?? []).filter((s) => Date.parse(s.at) >= since && s.cause);
@@ -98,18 +95,6 @@ function ruleTriggers(state, now) {
   return out;
 }
 
-function ruleDriveTop(state, now) {
-  const since = windowSince(now);
-  const samples = (state.emotionJournal ?? []).filter((s) => Date.parse(s.at) >= since && s.top);
-  if (samples.length < 6) return [];
-  const counts = {};
-  for (const s of samples) counts[s.top] = (counts[s.top] ?? 0) + 1;
-  const [key, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-  const share = n / samples.length;
-  if (share < 0.6) return [];
-  return [{ kind: 'drive_top', subject: key, text: `这周我脑子里最常冒头的是「${labelOf(key)}」，${samples.length} 次采样里 ${n} 次都是它排第一。`, evidence: { drive: key, share: round2(share), samples: samples.length } }];
-}
-
 function ruleObsession(state) {
   const out = [];
   for (const o of state.thoughtPool?.obsessions ?? []) {
@@ -120,15 +105,15 @@ function ruleObsession(state) {
   return out;
 }
 
-function ruleMemoryLoop(state, now) {
-  const since = windowSince(now);
-  const counts = {};
-  for (const s of state.recentSurfacings ?? []) {
-    if (Date.parse(s.at) < since) continue;
-    for (const d of s.domains ?? []) counts[d] = (counts[d] ?? 0) + 1;
+// 周几是"看一眼"的日子（默认周日）。其它日子候选只攒着，不进信封、不催。
+export function isReviewDay(now = new Date(), { weekday = 0, timeZone = 'Asia/Shanghai' } = {}) {
+  try {
+    const name = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(new Date(now));
+    const idx = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(name);
+    return idx === Number(weekday);
+  } catch {
+    return new Date(now).getUTCDay() === Number(weekday);
   }
-  return Object.entries(counts).filter(([, n]) => n >= 4).sort((a, b) => b[1] - a[1]).slice(0, 2)
-    .map(([domain, n]) => ({ kind: 'memory_loop', subject: domain, text: `这周浮上来的记忆老是绕着「${domain}」，${n} 次。`, evidence: { domain, count: n } }));
 }
 
 // ── 扫描 ─────────────────────────────────────────────────────────
@@ -139,13 +124,21 @@ export function scanAwareness(input, now = new Date(), options = {}) {
   const today = dayKey(now, timeZone);
   if (!options.force && awareness.lastScanDay === today) return { state, changed: false, added: [] };
 
-  const found = [...ruleMoodWeek(state, now), ...ruleTriggers(state, now), ...ruleDriveTop(state, now), ...ruleObsession(state), ...ruleMemoryLoop(state, now)];
+  // 两周没人理的候选自动过期：不强迫他处理
+  const expireBefore = new Date(now).getTime() - EXPIRE_DAYS * 86_400_000;
+  let expired = 0;
+  for (const c of awareness.candidates) {
+    if (c.status === 'open' && Date.parse(c.createdAt) < expireBefore) { c.status = 'expired'; c.resolvedAt = iso(now); expired += 1; }
+  }
+  const found = [...ruleTriggers(state, now), ...ruleObsession(state)]
+    .sort((a, b) => RULE_PRIORITY.indexOf(a.kind) - RULE_PRIORITY.indexOf(b.kind));
   const dedupeSince = new Date(now).getTime() - DEDUPE_DAYS * 86_400_000;
   const recent = new Set(awareness.candidates.filter((c) => Date.parse(c.createdAt) >= dedupeSince).map((c) => `${c.kind}:${c.subject}`));
   const openCount = awareness.candidates.filter((c) => c.status === 'open').length;
   const added = [];
   for (const item of found) {
     if (recent.has(`${item.kind}:${item.subject}`)) continue;
+    if (added.length >= MAX_PER_DAY) break;                 // 一天最多一条
     if (openCount + added.length >= MAX_OPEN) break;
     added.push({
       id: `aw_${today.replace(/-/g, '')}_${item.kind}_${String(item.subject).replace(/[^\w一-鿿]+/g, '').slice(0, 24) || 'x'}`,
@@ -163,7 +156,7 @@ export function scanAwareness(input, now = new Date(), options = {}) {
   }
   awareness.candidates = [...awareness.candidates, ...added].slice(-MAX_KEEP);
   awareness.lastScanDay = today;
-  const changed = added.length > 0 || input?.awareness?.lastScanDay !== today;
+  const changed = added.length > 0 || expired > 0 || input?.awareness?.lastScanDay !== today;
   if (changed) state.revision = Number(state.revision ?? 0) + 1;
   return { state, changed, added };
 }
@@ -194,13 +187,19 @@ export function awarenessSummary(state) {
     open: openAwareness(state, 8).map(({ id, kind, subject, text, aspect, createdAt, evidence }) => ({ id, kind, subject, text, aspect, createdAt, evidence })),
     confirmed: all.filter((c) => c.status === 'confirmed').slice(-6).reverse().map(({ id, kind, text, aspect, resolvedAt, note }) => ({ id, kind, text, aspect, resolvedAt, note })),
     dismissedCount: all.filter((c) => c.status === 'dismissed').length,
+    expiredCount: all.filter((c) => c.status === 'expired').length,
     lastScanDay: state?.awareness?.lastScanDay ?? null,
   };
 }
 
-// 信封：最多两条待确认 + 一句怎么处理。不塞已确认的（那些已经在 OB 里，SessionStart 会附）。
-export function renderAwareness(state) {
-  const open = openAwareness(state, 2);
+// 信封：只在"看一眼"的日子（默认周日）出现，一周攒下的最多七条 + 一句怎么处理。
+// 不塞已确认的（那些已经在 OB 里，SessionStart 会附）。force=true 用于 list 之类主动查看。
+export function renderAwareness(state, { now = new Date(), timeZone = 'Asia/Shanghai', reviewWeekday = 0, force = false } = {}) {
+  if (!force && !isReviewDay(now, { weekday: reviewWeekday, timeZone })) return '';
+  const open = openAwareness(state, 7);
   if (!open.length) return '';
-  return [...open.map((c) => `- ${c.text}（id=${c.id}）`), '这是系统从我这几天的轨迹里挑出来的，不一定对。觉得是的用 xinchao_awareness 确认，不是的放下；都由我自己定。'].join('\n');
+  return [
+    ...open.map((c) => `- ${c.text}（id=${c.id}）`),
+    '这周系统从我的轨迹里挑出来的，不一定对，看一眼就行。觉得是的，可以用自己的话写一句 xinchao_awareness confirm（text=我的话），那句才会进 OB 沉淀；不想写就只 confirm 或 dismiss 记一笔；不理也行，两周后自动过期。',
+  ].join('\n');
 }

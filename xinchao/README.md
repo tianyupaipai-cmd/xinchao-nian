@@ -9,7 +9,7 @@
 3.2 之前，心潮回答"我想要什么"（12 维驱力）和"我是谁"（14 维性格 + 锚点）。3.3 补上中间那层——"我现在怎样"、"我最近的样子"——以及把这些递到 AI 窗口里的两条通道。
 
 - **情绪层**：valence / arousal 两轴，和 OB 记忆桶同一套坐标；互动事件打脉冲、会话 tone 拉扯、grieve/anger 拽回落目标；只做指数回落，没有增长项，不自激。情绪反过来调制各维增速（难受更惦记、开心更想分享），并把坐标带进 breath 做共振排序。
-- **自我觉察**：每天从情绪日志、驱力采样、持续念头、浮现记忆里挑"我最近的样子"的候选；`xinchao_awareness` 确认或放下，只由 AI 自己定，确认后经 OB `I` 沉淀。
+- **自我觉察**：每天最多从轨迹里挑一条有因果的候选（反复触发 / 被安抚 / 缠人的念头），攒到复盘日（默认周日）看一眼；`xinchao_awareness` 确认或放下只由 AI 自己定，确认时带了自己的话那句才经 OB `I` 沉淀，不写只记一笔，两周没理自动过期。
 - **黑匣子** `xinchao_box`：只有 AI 能看的地方，单独文件存，不进 Dashboard、接口、OB；支持到期、露头（surface）、事的日期（when）和到点提醒（remind_at）。攒下的话（pending）退役，由它接替。
 - **"此刻"块** `GET /v1/now`：三到六行第一人称状态，给客户端每回合钩子附进上下文，不占工具调用；每个 `xinchao_*` 工具回应末尾也自带一行。
 - **心潮自身信号**（Bridge `reason=self_signal`）：驱力冲顶、情绪转折、挂念、醒来余韵、觉察候选、持续念头，六种"发生"递到 AI 窗口；话术第一人称、无数字、不写"不用回"。没被接走的信号在下一次 `xinchao_context` 的"你不在的时候"段带出。
@@ -155,7 +155,7 @@ https://xinchao.example.com/mcp
 | `xinchao_cabin_inbox` | 读取用户明确开锁的小屋来信；上锁正文永不返回 |
 | `xinchao_cabin_note` | AI 主动给用户的小屋留一封信或便签 |
 | `xinchao_box` | 黑匣子：只有 AI 能看的地方（put / list / read / burn / keep；支持到期、露头、事的日期、到点提醒）。3.3 起接替 pending |
-| `xinchao_awareness` | 自我觉察候选：list / confirm / dismiss / scan；确认与放下只由 AI 定 |
+| `xinchao_awareness` | 自我觉察候选：list / confirm / dismiss / scan；确认与放下只由 AI 定；confirm 带 `text`（自己的话）才写 OB |
 | `xinchao_anchor_update` | 行为锚点增删；只由 AI 自己认定或用户明确确认后写入 |
 | `xinchao_personality_reflect` | AI 每月自主完成一次完整 14 维内核评分；人类不参与，同月不可覆盖 |
 

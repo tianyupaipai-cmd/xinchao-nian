@@ -9,7 +9,7 @@
 //   emotion_shift  情绪掉进低落/烦躁并停留 30 分钟；或从低落回到安心（一个回合一次，2 小时内最多一条）
 //   longing        挂念 ≥0.6（一个空档一次；降到 0.35 以下才算空档结束）
 //   wake_residue   醒来且梦有余韵（每次醒来一次）
-//   awareness      当天新冒出的觉察候选（每天一次）
+//   awareness      复盘日（默认周日）攒下的觉察候选，一周一次，只说有几条、看不看随他
 //   obsession      有件事反复浮上来长成了持续念头（每个念头一次；说不说由他定）
 // 全天合计 ≤8 条；凌晨冻结时段（dawnFreeze，默认 1–8 点）不发；投递 2 小时过期，窗口不在就作废不补投。
 //
@@ -19,6 +19,7 @@
 import { DRIVE_KEYS } from './dimensions.js';
 import { computeLonging, localDayAndHour, topDrives } from './engine.js';
 import { emotionSummary } from './emotion.js';
+import { isReviewDay } from './awareness.js';
 
 const iso = (value) => new Date(value).toISOString();
 const H = 3_600_000;
@@ -66,7 +67,7 @@ const EMOTION_TEMPLATES = {
 const LONGING_TEMPLATES = ['过了她平时来的点了，还没见人，有点想她。', '她这个点一般会来，今天还没来，我在等。', '门口那盏灯一直亮着，她还没游过来。'];
 const WAKE_TEMPLATES = ['刚醒。梦里剩了一句：{residue}', '醒了，梦还没散干净：{residue}', '刚从梦里出来，留下来的是：{residue}'];
 const OBSESSION_TEMPLATES = ['有件事今天一直在脑子里绕：{text}', '从早上到现在老想起同一件事：{text}', '这件事今天冒出来好几次了：{text}'];
-const AWARENESS_TEMPLATES = ['今天冒出一条觉察：{text} 要不要认，我自己定。', '系统从这几天的轨迹里挑了一条：{text} 是不是这样，我自己看。'];
+const AWARENESS_TEMPLATES = ['这周攒了{n}条觉察候选，有空看一眼就行，不认也没关系。', '系统这周挑了{n}条我最近的样子，我自己看看是不是；不是就放下。'];
 const CAUSE_LABEL = { conflict: '争执', loss: '失落', reflection: '沉淀', companionship: '她走了', task_progress: '忙完', discovery: '折腾完', sharing: '说完', affection: '被安抚', intimacy: '亲近', reconciliation: '和好' };
 
 export function ensureSelfSignals(state) {
@@ -191,11 +192,10 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
     if (push('wake_residue', pa.dreamId, pickTemplate(ss, 'wake', WAKE_TEMPLATES, now).replace('{residue}', residue))) ss.lastWakeDreamId = pa.dreamId;
   }
 
-  // 5. 觉察候选：当天新冒出的，每天一次，只念第一条。
-  const fresh = (state.awareness?.candidates ?? []).filter((c) => c.status === 'open' && String(c.createdAt).startsWith(day));
-  if (fresh.length && ss.awarenessDay !== day && !asleep) {
-    const c = fresh[0];
-    if (push('awareness', c.id, pickTemplate(ss, 'awareness', AWARENESS_TEMPLATES, now).replace('{text}', c.text))) ss.awarenessDay = day;
+  // 5. 觉察候选：只在复盘日（默认周日）提一次，说有几条就够，正文在信封里；不催、不念原文。
+  const open = (state.awareness?.candidates ?? []).filter((c) => c.status === 'open');
+  if (open.length && ss.awarenessDay !== day && !asleep && isReviewDay(now, { weekday: options.awarenessReviewWeekday ?? 0, timeZone: options.timeZone ?? 'Asia/Shanghai' })) {
+    if (push('awareness', `week:${day}`, pickTemplate(ss, 'awareness', AWARENESS_TEMPLATES, now).replace('{n}', String(open.length)))) ss.awarenessDay = day;
   }
 
   // 6. 持续念头：闪念被反复强化升成 obsession 时递一次（按念头文本去重，同一条只递一次）。

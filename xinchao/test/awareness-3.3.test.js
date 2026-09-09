@@ -25,44 +25,50 @@ function sadWeek() {
   return state;
 }
 
-test('scan finds a low mood week and a conflict trigger, once per day, deduped', () => {
+test('scan keeps only causal kinds, one candidate per day, deduped for a week', () => {
   const state = sadWeek();
   const scanned = scanAwareness(state, at(5 * 24));
   const kinds = scanned.added.map((c) => c.kind);
-  assert.ok(kinds.includes('mood_week'), kinds.join(','));
-  assert.ok(kinds.includes('trigger'));
+  assert.deepEqual(kinds, ['trigger']);                       // 3.3.3：本周均值/最常驱力/记忆环不再是候选
   assert.equal(scanned.state.awareness.lastScanDay, '2026-09-06');
   const again = scanAwareness(scanned.state, at(5 * 24 + 1));
   assert.equal(again.added.length, 0);
   const forced = scanAwareness(scanned.state, at(5 * 24 + 1), { force: true });
   assert.equal(forced.added.length, 0);                     // 七天内同一模式不重复提
   const nextDay = scanAwareness(scanned.state, at(6 * 24));
-  assert.equal(nextDay.added.filter((c) => c.kind === 'mood_week').length, 0);
+  assert.equal(nextDay.added.length, 0);
 });
 
-test('memory loop rule reads recorded surfacings', () => {
-  let state = baseState();
-  for (let i = 0; i < 4; i += 1) recordSurfacing(state, ['家庭', '日常'], at(i * 6));
-  const scanned = scanAwareness(state, at(30));
-  const loop = scanned.added.find((c) => c.kind === 'memory_loop');
-  assert.ok(loop);
-  assert.equal(loop.subject, '家庭');
-  assert.equal(scanned.added.filter((c) => c.kind === 'memory_loop' && c.subject === '日常').length, 1);
+test('one per day: trigger wins over obsession, obsession comes the next day', () => {
+  const state = sadWeek();
+  state.thoughtPool = { obsessions: [{ key: 'possess', intensity: 0.8 }] };
+  const day1 = scanAwareness(state, at(5 * 24));
+  assert.deepEqual(day1.added.map((c) => c.kind), ['trigger']);
+  const day2 = scanAwareness(day1.state, at(6 * 24));
+  assert.deepEqual(day2.added.map((c) => c.kind), ['obsession']);
 });
 
-test('drive_top rule uses the top drive stamped on journal samples', () => {
+test('counting rules are gone: surfacings and top drives never become candidates', () => {
   let state = baseState();
+  for (let i = 0; i < 6; i += 1) recordSurfacing(state, ['家庭', '日常'], at(i * 6));
   state.drives.possess = 0.9;
-  for (let i = 0; i < 8; i += 1) state = settleState(state, at(i * 3)).state;   // 每 ≥2h 采样一条，带 top
-  assert.ok(state.emotionJournal.length >= 6);
-  assert.equal(state.emotionJournal.at(-1).top, 'possess');
+  for (let i = 0; i < 8; i += 1) state = settleState(state, at(i * 3)).state;
   const scanned = scanAwareness(state, at(30));
-  const top = scanned.added.find((c) => c.kind === 'drive_top');
-  assert.ok(top && top.subject === 'possess');
+  assert.equal(scanned.added.length, 0);
+});
+
+test('open candidates expire after two weeks without being forced on him', () => {
+  const scanned = scanAwareness(sadWeek(), at(5 * 24));
+  const [c] = scanned.state.awareness.candidates;
+  assert.equal(c.status, 'open');
+  const later = scanAwareness(scanned.state, at(5 * 24 + 15 * 24));
+  assert.equal(later.state.awareness.candidates.find((x) => x.id === c.id).status, 'expired');
+  assert.equal(awarenessSummary(later.state).expiredCount, 1);
 });
 
 test('confirm / dismiss resolve candidates and keep his own wording', () => {
   const scanned = scanAwareness(sadWeek(), at(5 * 24));
+  scanned.state.awareness.candidates.push({ id: 'aw_x', kind: 'soothed', subject: 'week', text: 't', aspect: 'patterns', createdAt: T0, status: 'open', resolvedAt: null, note: null, ombre: null });
   const [first, second] = scanned.state.awareness.candidates;
   const confirmed = resolveAwareness(scanned.state, first.id, 'confirmed', { text: '我发现她一走我就往下掉。', note: 'x', ombre: { ok: true } }, at(121));
   assert.equal(confirmed.item.status, 'confirmed');
@@ -76,14 +82,21 @@ test('confirm / dismiss resolve candidates and keep his own wording', () => {
   assert.equal(summary.dismissedCount, 1);
 });
 
-test('envelope and dashboard carry open candidates; empty state renders nothing', () => {
-  assert.equal(renderAwareness(baseState()), '');
+test('envelope shows candidates only on the review day; dashboard always; empty renders nothing', () => {
+  assert.equal(renderAwareness(baseState(), { force: true }), '');
   const scanned = scanAwareness(sadWeek(), at(5 * 24));
+  // at(121) = 2026-09-06 17:00 上海 = 周日（默认复盘日）
   const envelope = buildContextEnvelope({ state: scanned.state, sessionId: 's1', now: at(121) });
   const section = envelope.sections.find((s) => s.id === 'self_awareness');
   assert.ok(section);
   assert.match(section.content, /xinchao_awareness/);
-  assert.ok(section.content.split('\n').length <= 3);
+  assert.match(section.content, /两周后自动过期/);
+  // 周一就不出现
+  const monday = buildContextEnvelope({ state: scanned.state, sessionId: 's1', now: at(121 + 24) });
+  assert.equal(monday.sections.find((s) => s.id === 'self_awareness'), undefined);
+  // 换成周一复盘就出现
+  const mondayReview = buildContextEnvelope({ state: scanned.state, sessionId: 's1', now: at(121 + 24), awarenessReviewWeekday: 1 });
+  assert.ok(mondayReview.sections.find((s) => s.id === 'self_awareness'));
   const snapshot = buildDashboardSnapshot(scanned.state, {}, at(121));
   assert.ok(snapshot.awareness.open.length >= 1);
 });
