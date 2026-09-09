@@ -970,33 +970,57 @@ async function handleAwareness(input = {}, now = new Date()) {
       (latest) => scanAwareness(latest, now, { timeZone: config.settle.timeZone, force: true }).state);
     return { action, ...awarenessSummary(state) };
   }
-  if (action !== 'confirm' && action !== 'dismiss') throw new Error('action 必须是 list / confirm / dismiss / scan');
+  // retry_ombre：把"已确认但当时没写进 OB"的条目补写一次（2026-09-09 修局部变量遮住 OB 客户端的 bug 后用来补账）
+  if (action === 'retry_ombre') {
+    if (!config.ombre.writeEnabled || config.shadowMode) return { action, retried: [], reason: 'OB 写入未开' };
+    const current = await store.read();
+    const pending = (current.awareness?.candidates ?? []).filter((c) => c.status === 'confirmed' && c.ombre && c.ombre.ok === false);
+    const retried = [];
+    for (const item of pending) {
+      const aspect = String(item.aspect ?? 'patterns');
+      const result = await writeAwarenessToOmbre(item.id, String(item.text ?? '').trim(), aspect);
+      retried.push({ id: item.id, ok: result.ok });
+      if (!result.ok) continue;
+      await updateState({ type: 'awareness_confirm', source: 'mcp', details: { id: item.id, kind: item.kind, ombre: true, retry: true }, at: now }, (latest) => {
+        const c = latest.awareness?.candidates?.find((x) => x.id === item.id);
+        if (c) c.ombre = result;
+        return latest;
+      });
+    }
+    return { action, retried };
+  }
+  if (action !== 'confirm' && action !== 'dismiss') throw new Error('action 必须是 list / confirm / dismiss / scan / retry_ombre');
   const id = String(input.id ?? '').trim();
   if (!id) throw new Error('confirm / dismiss 需要 id');
   const current = await store.read();
   const probe = resolveAwareness(current, id, action === 'confirm' ? 'confirmed' : 'dismissed', {}, now);
   if (!probe.found) return { action, found: false, id };
   if (probe.already) return { action, found: true, already: probe.already, id };
-  let ombre = null;
+  // 注意：这里不能叫 ombre——文件顶部的 OB 客户端就叫 ombre，之前被局部变量遮住，确认从来没写进过 OB（2026-09-05 → 09-09）
+  let ombreResult = null;
   if (action === 'confirm' && config.ombre.writeEnabled && !config.shadowMode) {
     const content = String(input.text ?? probe.item.text ?? '').trim();
     const aspect = String(input.aspect ?? probe.item.aspect ?? 'patterns');
-    try {
-      const reply = await ombre.writeSelfAwareness(content, aspect);
-      ombre = { ok: true, aspect, reply: reply.slice(0, 200) };
-    } catch (error) {
-      ombre = { ok: false, aspect, error: String(error.message ?? error).slice(0, 200) };
-      log('awareness_ombre_write_failed', { id, message: error.message });
-    }
+    ombreResult = await writeAwarenessToOmbre(id, content, aspect);
   }
   const state = await updateState({
     type: action === 'confirm' ? 'awareness_confirm' : 'awareness_dismiss',
     source: 'mcp',
-    details: { id, kind: probe.item.kind, ombre: ombre ? ombre.ok : null },
+    details: { id, kind: probe.item.kind, ombre: ombreResult ? ombreResult.ok : null },
     at: now,
-  }, (latest) => resolveAwareness(latest, id, action === 'confirm' ? 'confirmed' : 'dismissed', { text: input.text, note: input.note, aspect: input.aspect, ombre }, now).state);
+  }, (latest) => resolveAwareness(latest, id, action === 'confirm' ? 'confirmed' : 'dismissed', { text: input.text, note: input.note, aspect: input.aspect, ombre: ombreResult }, now).state);
   const item = state.awareness.candidates.find((c) => c.id === id);
-  return { action, found: true, id, item, ombre };
+  return { action, found: true, id, item, ombre: ombreResult };
+}
+
+async function writeAwarenessToOmbre(id, content, aspect) {
+  try {
+    const reply = await ombre.writeSelfAwareness(content, aspect);
+    return { ok: true, aspect, reply: String(reply ?? '').slice(0, 200) };
+  } catch (error) {
+    log('awareness_ombre_write_failed', { id, message: error.message });
+    return { ok: false, aspect, error: String(error.message ?? error).slice(0, 200) };
+  }
 }
 
 async function saveHandoffNote(note, source = 'mcp', now = new Date()) {

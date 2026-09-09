@@ -177,7 +177,7 @@ export const XINCHAO_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'confirm', 'dismiss', 'scan'], description: '默认 list。' },
+        action: { type: 'string', enum: ['list', 'confirm', 'dismiss', 'scan', 'retry_ombre'], description: '默认 list。retry_ombre：把已确认但当时没写进 OB 的条目补写一次。' },
         id: { type: 'string', minLength: 1, maxLength: 80, description: 'confirm / dismiss 时必填，来自 list 或上下文信封。' },
         text: { type: 'string', minLength: 1, maxLength: 400, description: 'confirm 时可选：用我自己的话重写这条觉察。' },
         note: { type: 'string', minLength: 1, maxLength: 400, description: '可选补充。' },
@@ -614,6 +614,11 @@ async function callToolInner(name, args, handlers) {
         ? result.open.map((c) => `- [${c.id}] ${c.text}`)
         : ['（暂无候选）'];
       return toolText(`待我确认的觉察 ${result.open.length} 条；已确认 ${result.confirmed.length} 条。\n${lines.join('\n')}`, result);
+    }
+    if (result.action === 'retry_ombre') {
+      const n = result.retried?.length ?? 0;
+      const okN = (result.retried ?? []).filter((r) => r.ok).length;
+      return toolText(n ? `补写 OB：${okN}/${n} 条成功${okN < n ? `，失败：${result.retried.filter((r) => !r.ok).map((r) => r.id).join('、')}` : ''}` : `没有需要补写的条目${result.reason ? `（${result.reason}）` : ''}`, result);
     }
     if (!result.found) return toolText(`没有这条候选：${result.id}`, result);
     if (result.already) return toolText(`这条早已${result.already === 'confirmed' ? '确认' : '放下'}：${result.id}`, result);

@@ -2,6 +2,14 @@
 
 本项目遵循语义化版本。除非特别说明，所有外部模型、长期记忆、OAuth 与通知能力均保持默认关闭。
 
+## 3.3.2 — 2026-09-09
+
+### 修复
+
+- 自我觉察 `confirm` 从 3.3.0 起从未真正写进 OB：`handleAwareness` 里存写回结果的局部变量与文件顶部的 OB 客户端同名（`ombre`），调用落在 `null` 上；已确认条目本地照常记录，只是 OB 没沉淀。改名修复，写回抽成 `writeAwarenessToOmbre`。
+- `xinchao_awareness` 新增 `action=retry_ombre`：把"已确认但当时没写进 OB"的条目补写一次（补账用）。
+- Dockerfile 基础镜像改为构建参数 `NODE_IMAGE`（默认 `node:20-alpine`），仓库拉不到时可用本机已有镜像构建。
+
 ## 3.3.1 — 2026-09-07
 
 ### 实时动态版公开
