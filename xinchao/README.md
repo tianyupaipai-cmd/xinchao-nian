@@ -150,7 +150,7 @@ https://xinchao.example.com/mcp
 | 工具 | 作用 |
 | --- | --- |
 | `xinchao_context` | 获取当前动态短态和近期连续性；同一窗口首次启动默认只交付一次 |
-| `xinchao_event` | 回传一次明确互动及有界窗口状态；`event_id` 用于幂等 |
+| `xinchao_event` | 回传一次明确互动及有界窗口状态；`event_id` 用于幂等。自己窗口里直接填的类型只认 sharing / reflection / task_progress / discovery，她参与的给 `exchange` 让服务端判 |
 | `xinchao_handoff_note` | 保存限时近期进度摘要，不保存整段聊天原文 |
 | `xinchao_cabin_inbox` | 读取用户明确开锁的小屋来信；上锁正文永不返回 |
 | `xinchao_cabin_note` | AI 主动给用户的小屋留一封信或便签 |

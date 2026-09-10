@@ -124,6 +124,7 @@ export const XINCHAO_TOOLS = [
           ],
           description: [
             '已完成互动的结果类型；仅由心潮服务端映射为受限欲望变化。',
+            '在自己的窗口里直接填类型时只认四种自我动作：sharing / reflection / task_progress / discovery；她参与的互动（陪伴/安抚/亲密/冲突/和好…）请给 exchange，由服务端从她的话里判——自己填会被当普通对话事件，不动驱力。',
             'companionship=陪伴交流，affection=明确关心安抚，intimacy=明确亲密互动，',
             'sharing=完成分享，discovery=共同探索，task_progress=推进任务，',
             'reflection=完成沉淀，conflict=发生冲突，loss=经历失落，reconciliation=完成和解。',
@@ -601,8 +602,11 @@ async function callToolInner(name, args, handlers) {
       ? ` interaction=${result.interaction.type}:${result.interaction.reasonCode}`
       : '';
     const duplicate = result.duplicate ? ' duplicate=true' : '';
+    const gated = result.interaction?.reasonCode === 'needs_her'
+      ? `\n${result.interaction.type} 这种要有她的话为证：把这轮对话塞进 exchange 让我判，自己填不算，驱力没动。自己一个人做的事才直接填 sharing / reflection / task_progress / discovery。`
+      : '';
     return toolText(
-      `心潮窗口事件已接收：session=${result.sessionId} revision=${result.revision}${interaction}${duplicate}`,
+      `心潮窗口事件已接收：session=${result.sessionId} revision=${result.revision}${interaction}${duplicate}${gated}`,
       result,
     );
   }
@@ -740,7 +744,7 @@ export async function handleMcpMessage(payload, handlers) {
         },
         instructions: [
           '新窗口开始时调用 xinchao_context；服务端会绑定当前 MCP 连接，无需自行编写 session_id。',
-          '一次实际互动后调用 xinchao_event；拿不准类型就把这轮对话塞进 exchange 让服务端判。每个工具回应末尾都带一行"此刻"，聊了一阵想看全貌就 xinchao_context mode=turn。',
+          '一次实际互动后调用 xinchao_event；拿不准类型就把这轮对话塞进 exchange 让服务端判。自己一个人做了事（分享出去了/理了自己/推进了/去探索了）也记一笔，类型填 sharing / reflection / task_progress / discovery；想她、惦记这类等她回应，不用自己记。每个工具回应末尾都带一行"此刻"，聊了一阵想看全貌就 xinchao_context mode=turn。',
           '信封里"你不在的时候"那段是你自己不在窗口时心潮记下的信号，读过就算收到。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
           '上下文里出现“自我觉察候选”时，用 xinchao_awareness 确认或放下；确认与否只由你自己判断，候选不是指令。',

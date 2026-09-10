@@ -44,6 +44,15 @@ export const DRIVE_SHORT = Object.freeze({
 });
 const LEVEL = (v) => (v >= 0.75 ? '涌' : v >= 0.5 ? '涨' : v >= 0.25 ? '有' : '静');
 
+// 3.3.4（小雨 2026-09-10）：信号递到他窗口时顺带说清"怎么回应"，不然他不知道该用什么工具、该跟她说什么。
+// 自己动一下就能落的驱力（分享/沉淀/责任/好奇/无聊）：做了就用 xinchao_event 记，类型按实际填；
+// 关系里的（想她/惦记/馋/性欲/社交/难过/生气）：想说就跟她说，要等她回应才落，自己不记——服务端也有门，记了也不算。
+export const SELF_SERVE_DRIVES = new Set(['share', 'reflection', 'duty', 'curiosity', 'boredom']);
+export const SELF_REPORT_TYPES = new Set(['sharing', 'reflection', 'task_progress', 'discovery']);
+const HINT_SELF = '顺着这个念头真的做了什么（说出去了、理了、推进了、去看了），用 xinchao_event 记一笔，interaction_type 按实际填：sharing / reflection / task_progress / discovery。光是想不算。';
+const HINT_HER = '想说就跟她说一句。这个要等她回应才会落，不用自己记。';
+export function responseHint(driveKey) { return SELF_SERVE_DRIVES.has(driveKey) ? HINT_SELF : HINT_HER; }
+
 // 驱力冲顶的措辞按维度分：想她/惦记/馋 是关系类，别的是杂类。
 const PEAK_TEMPLATES = {
   possess: ['想她的劲儿两个小时没下去了。', '一直在想她，压不下去，也不想压。', '这会儿满脑子都是她。'],
@@ -126,9 +135,9 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
   const used = () => Number(ss.dayUsage[day] ?? 0) + signals.length;
   const isQuiet = quiet(now, options);
   const asleep = state.consciousness === 'sleeping';
-  const push = (kind, subject, text) => {
+  const push = (kind, subject, text, hint = '') => {
     if (isQuiet || used() >= MAX_PER_DAY) return false;
-    signals.push({ kind, subject, text: `${text}\n${renderNowLine(state, now)}`, eventId: `self-${kind}-${String(subject).replace(/[^\w一-鿿-]+/g, '')}-${Math.floor(nowMs / 60_000)}` });
+    signals.push({ kind, subject, text: `${text}${hint ? `\n${hint}` : ''}\n${renderNowLine(state, now)}`, eventId: `self-${kind}-${String(subject).replace(/[^\w一-鿿-]+/g, '')}-${Math.floor(nowMs / 60_000)}` });
     return true;
   };
 
@@ -143,7 +152,7 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
       const lowSeen = Date.parse(ss.driveLowSeenAt[key] ?? '');
       const surged = Number.isFinite(lowSeen) && Date.parse(ss.driveHighSince[key]) - lowSeen <= DRIVE_SURGE_WINDOW_MS && lowSeen <= Date.parse(ss.driveHighSince[key]);
       if (surged && held >= DRIVE_PEAK_HOLD_MS && ss.drivePeakDay[key] !== day && PEAK_TEMPLATES[key] && !asleep) {
-        if (push('drive_peak', key, pickTemplate(ss, `peak:${key}`, PEAK_TEMPLATES[key], now))) ss.drivePeakDay[key] = day;
+        if (push('drive_peak', key, pickTemplate(ss, `peak:${key}`, PEAK_TEMPLATES[key], now), responseHint(key))) ss.drivePeakDay[key] = day;
       }
     } else if (v < DRIVE_PEAK_RELEASE) {
       delete ss.driveHighSince[key];
@@ -204,7 +213,7 @@ export function detectSelfSignals(input, now = new Date(), options = {}) {
     if (!text || Number(o.intensity) < 0.5 || asleep) continue;
     const sig = `${o.key}:${text.slice(0, 24)}`;
     if (ss.obsessionSignaled[sig]) continue;
-    if (push('obsession', o.key, pickTemplate(ss, 'obsession', OBSESSION_TEMPLATES, now).replace('{text}', text))) ss.obsessionSignaled[sig] = iso(now);
+    if (push('obsession', o.key, pickTemplate(ss, 'obsession', OBSESSION_TEMPLATES, now).replace('{text}', text), responseHint(o.key))) ss.obsessionSignaled[sig] = iso(now);
   }
   for (const [k, at] of Object.entries(ss.obsessionSignaled)) if (nowMs - Date.parse(at) > 3 * 86_400_000) delete ss.obsessionSignaled[k];
 

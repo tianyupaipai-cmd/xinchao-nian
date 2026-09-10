@@ -3,7 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadConfig, validateConfig } from './config.js';
 import { emotionCoords, emotionSummary, stampEmotionArgs } from './emotion.js';
 import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
-import { detectSelfSignals, renderNowLine } from './self-signals.js';
+import { detectSelfSignals, renderNowLine, SELF_REPORT_TYPES } from './self-signals.js';
 import { BlackBox, renderBoxList } from './black-box.js';
 import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour, applySurfacedThought, surfacedDriveKey } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
@@ -1332,8 +1332,19 @@ const server = createServer(async (request, response) => {
           return createContextEnvelope(args);
         },
         event: async (event) => {
+          // 硬门：他自己在窗口里直接填的类型，只认"自己动一下就能落"的四种；关系类要有她的话（exchange）为证
+          const declared = String(event.interactionType ?? event.interaction_type ?? '').trim().toLowerCase();
+          let gated = null;
+          if (config.interaction.mcpSelfReportGate && declared && !SELF_REPORT_TYPES.has(declared) && !String(event.exchange ?? '').trim()) {
+            gated = declared;
+            event.interactionType = ''; delete event.interaction_type;
+          }
           await classifyExchange(event, 'mcp');
           const result = await recordConversationEvent(event, 'mcp');
+          if (gated) {
+            result.interaction = { type: gated, applied: false, reasonCode: 'needs_her', affectedDrives: [] };
+            log('interaction_self_report_gated', { type: gated });
+          }
           return {
             revision: result.revision,
             consciousness: result.consciousness,

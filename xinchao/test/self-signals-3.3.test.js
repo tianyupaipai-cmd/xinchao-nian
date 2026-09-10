@@ -114,3 +114,12 @@ test('a promoted obsession is announced once', () => {
   assert.match(ob.text, /门是可以拉开的/);
   assert.equal(detectSelfSignals(r.state, at(1)).signals.filter((s) => s.kind === 'obsession').length, 0);
 });
+
+test('drive peak signals carry a response hint: self-serve drives say how to report, relational ones say wait for her', async () => {
+  const { responseHint, SELF_SERVE_DRIVES } = await import('../src/self-signals.js');
+  assert.ok(SELF_SERVE_DRIVES.has('reflection'));
+  assert.match(responseHint('reflection'), /xinchao_event/);
+  assert.match(responseHint('share'), /sharing \/ reflection \/ task_progress \/ discovery/);
+  assert.doesNotMatch(responseHint('possess'), /xinchao_event/);
+  assert.match(responseHint('possess'), /等她回应/);
+});
