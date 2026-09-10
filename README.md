@@ -154,3 +154,7 @@ AI Runtime。梦境、余韵、思念、内部状态与 AI 自主行动**不允�
 
 > 详细边界见上游来源说明。融合不改变 OB 原生记忆库功能——breath/hold/grow/dream/trace/
 > anchor/release/forget/restore/purge/I/plan/letter/pulse 与 Dashboard 全部保留。
+
+## 联系
+
+商业合作及付费咨询请联系：tianyupaipai@gmail.com
