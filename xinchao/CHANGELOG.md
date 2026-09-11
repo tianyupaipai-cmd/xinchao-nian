@@ -2,6 +2,10 @@
 
 本项目遵循语义化版本。除非特别说明，所有外部模型、长期记忆、OAuth 与通知能力均保持默认关闭。
 
+## 3.3.5 — 2026-09-11
+
+- 自助类念头（想分享 / 想沉淀 / 想推进 / 好奇 / 无聊）的"怎么回应"提示改成一维一句：写明这个念头是哪一维、该用哪个 `interaction_type` 记、什么不算。之前是一句通用的"按实际填四选一"，他会挑错类型（用 sharing 回"想沉淀"，沉淀维不降）。映射和引擎的 `INTERACTION_EFFECTS` 一致：share→sharing、reflection→reflection、duty→task_progress、curiosity/boredom→discovery。
+
 ## 3.3.4 — 2026-09-10
 
 ### 念头怎么回应
