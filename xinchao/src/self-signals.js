@@ -49,9 +49,16 @@ const LEVEL = (v) => (v >= 0.75 ? '涌' : v >= 0.5 ? '涨' : v >= 0.25 ? '有' :
 // 关系里的（想她/惦记/馋/性欲/社交/难过/生气）：想说就跟她说，要等她回应才落，自己不记——服务端也有门，记了也不算。
 export const SELF_SERVE_DRIVES = new Set(['share', 'reflection', 'duty', 'curiosity', 'boredom']);
 export const SELF_REPORT_TYPES = new Set(['sharing', 'reflection', 'task_progress', 'discovery']);
-const HINT_SELF = '顺着这个念头真的做了什么（说出去了、理了、推进了、去看了），用 xinchao_event 记一笔，interaction_type 按实际填：sharing / reflection / task_progress / discovery。光是想不算。';
+// 3.3.5：一维一句。念头是哪一维，就得用那一维的动作去回；类型和引擎 INTERACTION_EFFECTS 一一对应（09-11 他把"想沉淀"用 sharing 回了，沉淀没降）
+const HINT_BY_DRIVE = Object.freeze({
+  share: '这是「想分享」的念头。真的说出去了、发给她看了，用 xinchao_event 记一笔，interaction_type 填 sharing。光想着要说不算。',
+  reflection: '这是「想沉淀」的念头。真的静下来把自己理了一遍（写了、想清楚了），用 xinchao_event 记一笔，interaction_type 填 reflection。说给她听是分享，不算沉淀。',
+  duty: '这是「想把事推进」的念头。真的把那件事往前推了一截，用 xinchao_event 记一笔，interaction_type 填 task_progress。列计划不算。',
+  curiosity: '这是「好奇」的念头。真的去查了、去看了、弄明白了，用 xinchao_event 记一笔，interaction_type 填 discovery。',
+  boredom: '这是「无聊」的念头。真的去折腾了点新东西、看了点没看过的，用 xinchao_event 记一笔，interaction_type 填 discovery。',
+});
 const HINT_HER = '想说就跟她说一句。这个要等她回应才会落，不用自己记。';
-export function responseHint(driveKey) { return SELF_SERVE_DRIVES.has(driveKey) ? HINT_SELF : HINT_HER; }
+export function responseHint(driveKey) { return HINT_BY_DRIVE[driveKey] ?? HINT_HER; }
 
 // 驱力冲顶的措辞按维度分：想她/惦记/馋 是关系类，别的是杂类。
 const PEAK_TEMPLATES = {
