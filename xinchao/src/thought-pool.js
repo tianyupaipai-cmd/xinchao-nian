@@ -42,7 +42,8 @@ export function tickThoughtPool(pool) {
     .map((o) => {
       const next = { ...o, intensity: Math.min(1, o.intensity * OBSESSION_GROWTH) };
       if (next.intensity > FEEDBACK_CEIL && next.feedbacks < MAX_FEEDBACKS) {
-        feedbacks[next.key] = (feedbacks[next.key] ?? 0) + FEEDBACK_AMOUNT;
+        // 3.3.6（小雨 09-13）：同一个念头只回推驱力一次；后两次只算寿命、不再推（原来 3 次 ×0.18 把沉淀维钉死在 1.0）
+        if (next.feedbacks === 0) feedbacks[next.key] = (feedbacks[next.key] ?? 0) + FEEDBACK_AMOUNT;
         next.feedbacks += 1;
       }
       return next;

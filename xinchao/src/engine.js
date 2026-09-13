@@ -9,6 +9,7 @@ import { INTERACTION_EMOTION, applyEmotionImpulse, blendEmotionTowardTone, emoti
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 // 驱力被顶到自己的静息天花板之上后，每小时松弛回来的比例（越大回落越快）。
 const CEIL_RELAX_PER_HOUR = 0.10;
+const THOUGHT_FEEDBACK_CAP = 0.85;   // 3.3.6：念头回推的驱力上限
 // 记忆共振只回推亲和度够强的维度，弱关联不动（沿用规格 onRecall 的 >0.5 门槛）。
 const RESONANCE_MIN_AFFINITY = 0.5;
 // 作息预期：她隔了一段时间后再出现才算"一次到来"计入节律；心跳不算。旧节律每次到来轻微衰减，自适应。
@@ -470,7 +471,9 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
   for (const [key, amount] of Object.entries(feedbacks)) {
     if (DRIVE_KEYS.includes(key)) {
       const before = Number(state.drives[key]);
-      state.drives[key] = Number(clamp(before + amount).toFixed(4));
+      // 3.3.6：念头回推只把驱力顶到 THOUGHT_FEEDBACK_CAP 为止，已经够高就不推——念头本身已经够强，不需要再顶到天花板
+      if (before >= THOUGHT_FEEDBACK_CAP) continue;
+      state.drives[key] = Number(clamp(Math.min(THOUGHT_FEEDBACK_CAP, before + amount)).toFixed(4));
       if (state.drives[key] !== before) changed = true;
     }
   }
