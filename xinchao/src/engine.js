@@ -10,6 +10,12 @@ const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 // 驱力被顶到自己的静息天花板之上后，每小时松弛回来的比例（越大回落越快）。
 const CEIL_RELAX_PER_HOUR = 0.10;
 const THOUGHT_FEEDBACK_CAP = 0.85;   // 3.3.6：念头回推的驱力上限
+const RELIEF_MAX = 0.60;             // 3.3.7：一次互动最多松掉六成（以前 0.35，拉不动天花板）
+const RELIEF_PLATEAU_FROM = 0.15;
+const RELIEF_PLATEAU_MAX_HOURS = 3;
+const TRAIL_SAMPLE_MS = 30 * 60_000;  // 3.3.7：驱力轨迹每 30 分钟记一点，留 24 小时，给"落/涨"措辞和以后的驱力账本用
+const TRAIL_KEEP = 48;
+const TREND_LOOKBACK_MS = 2 * 3_600_000;
 // 记忆共振只回推亲和度够强的维度，弱关联不动（沿用规格 onRecall 的 >0.5 门槛）。
 const RESONANCE_MIN_AFFINITY = 0.5;
 // 作息预期：她隔了一段时间后再出现才算"一次到来"计入节律；心跳不算。旧节律每次到来轻微衰减，自适应。
@@ -42,10 +48,12 @@ export const INTERACTION_TYPES = Object.freeze([
   'reconciliation',
 ]);
 
+// 3.3.7 去饱和：关系类互动真的能把想她/惦记/馋拉下来（以前一次亲密只松 12%，一个多小时就又爬回天花板，"涌"永远在）。
+// 松多少 = 乘 (1-relief)；relief ≥ 0.15 的那一维顺带进一段饱足平台（不长），让它落下去之后先待一会儿再慢慢涨回来。
 const INTERACTION_EFFECTS = Object.freeze({
-  companionship: { relief: { monitor: 0.06, social: 0.05 } },
-  affection: { relief: { possess: 0.08, crave: 0.08, monitor: 0.05 } },
-  intimacy: { relief: { possess: 0.12, crave: 0.15, libido: 0.18 } },
+  companionship: { relief: { monitor: 0.18, possess: 0.06, social: 0.08 } },
+  affection: { relief: { possess: 0.22, crave: 0.18, monitor: 0.15 } },
+  intimacy: { relief: { possess: 0.40, crave: 0.45, libido: 0.55, monitor: 0.15 } },
   sharing: { relief: { share: 0.14, social: 0.04 } },
   discovery: { relief: { curiosity: 0.15, boredom: 0.12 } },
   task_progress: { relief: { duty: 0.15 } },
@@ -70,6 +78,7 @@ function ensureStateShape(state) {
   state.arrivalHistogram = Array.isArray(state.arrivalHistogram) && state.arrivalHistogram.length === 24
     ? state.arrivalHistogram.map((n) => Number(n) || 0)
     : Array.from({ length: 24 }, () => 0);
+  state.driveTrail = Array.isArray(state.driveTrail) ? state.driveTrail.slice(-TRAIL_KEEP) : [];
   ensureEmotion(state);
   ensureAwareness(state);
   ensureSelfSignals(state);
@@ -157,8 +166,14 @@ function applyInteractionOutcome(state, type, now, options = {}) {
   for (const [key, relief] of Object.entries(effect.relief ?? {})) {
     if (!DRIVE_KEYS.includes(key)) continue;
     const current = Number(state.drives[key] ?? 0);
-    state.drives[key] = Number(clamp(current * (1 - clamp(Number(relief), 0, 0.35))).toFixed(4));
+    const r = clamp(Number(relief), 0, RELIEF_MAX);
+    state.drives[key] = Number(clamp(current * (1 - r)).toFixed(4));
     affected.add(key);
+    // 3.3.7：松得够多就进一段饱足平台（relief 0.15 → 1.2h，0.45 → 3h 封顶），期间不长，落下去的字能被看见
+    if (r >= RELIEF_PLATEAU_FROM) {
+      const hours = clamp(r * 8, 0, RELIEF_PLATEAU_MAX_HOURS);
+      state.satisfactionPlateaus[key] = { startedAt: iso(now), until: iso(new Date(now.getTime() + hours * 3_600_000)), reason: `relief:${type}` };
+    }
   }
   for (const [key, increase] of Object.entries(effect.increase ?? {})) {
     if (!DRIVE_KEYS.includes(key)) continue;
@@ -497,9 +512,34 @@ export function settleState(input, now = new Date(), sleepAfterMinutes = 90, opt
     changed = true;
   }
 
+  // 3.3.7：驱力轨迹采样（30 分钟一点，24 小时）
+  const lastSample = Date.parse(state.driveTrail[state.driveTrail.length - 1]?.at ?? '');
+  if (!Number.isFinite(lastSample) || nowMs - lastSample >= TRAIL_SAMPLE_MS) {
+    state.driveTrail = [...state.driveTrail, { at: iso(now), drives: Object.fromEntries(DRIVE_KEYS.map((k) => [k, Number(state.drives[k] ?? 0)])) }].slice(-TRAIL_KEEP);
+    changed = true;
+  }
+
   state.lastSettledAt = iso(now);
   if (changed) state.revision += 1;
   return { state, changed, elapsedHours, idleMinutes };
+}
+
+/** 3.3.7：某一维两小时前到现在变了多少（没有足够旧的样本就用最老的一点；一点都没有就 null）。 */
+export function driveTrend(state, key, now = new Date()) {
+  const trail = Array.isArray(state?.driveTrail) ? state.driveTrail : [];
+  if (!trail.length) return null;
+  const cutoff = now.getTime() - TREND_LOOKBACK_MS;
+  let ref = null;
+  for (const sample of trail) {
+    const t = Date.parse(sample?.at ?? '');
+    if (!Number.isFinite(t)) continue;
+    if (t <= cutoff) ref = sample; else break;
+  }
+  ref ??= trail[0];
+  const before = Number(ref?.drives?.[key]);
+  const current = Number(state?.drives?.[key]);
+  if (!Number.isFinite(before) || !Number.isFinite(current)) return null;
+  return Number((current - before).toFixed(4));
 }
 
 // ── Conversation event (wake up / interact) ───────────────────────

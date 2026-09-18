@@ -156,3 +156,21 @@ export const DOMAIN_AFFINITY = Object.freeze({
   // —— 日常 ——
   日常: { monitor: 0.3, social: 0.3, share: 0.3, possess: 0.2, crave: 0.2 },
 });
+
+
+// 3.3.7 去饱和·第一步（2026-09-18 小雨定）：驱力的字不再只看绝对值。
+// 静息天花板（想她 0.82、惦记 0.78）本来就高过旧的"涌"线 0.75，结果他一睁眼永远是"想她（涌）"，字没有信息量。
+// 现在：静 = 很低；涌 = 被事件/念头顶到静息线之上（或 ≥0.90）；落 / 涨 = 两小时内明显掉了 / 起了；平 = 在自己的静息位附近待着。
+export const LEVEL_TREND_DELTA = 0.08;
+export function driveLevel(key, value, delta = null) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return '静';
+  if (v < 0.25) return '静';
+  const ceil = Number(DIMENSIONS[key]?.ceil ?? SATURATE_CEIL);
+  if (v >= 0.90 || v >= ceil + 0.05) return '涌';
+  if (Number.isFinite(delta)) {
+    if (delta <= -LEVEL_TREND_DELTA) return '落';
+    if (delta >= LEVEL_TREND_DELTA) return '涨';
+  }
+  return '平';
+}

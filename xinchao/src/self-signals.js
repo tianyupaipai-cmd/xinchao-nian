@@ -16,8 +16,8 @@
 // 话术：第一人称、现在时、像心里冒出来的一句，没有数字、没有维度名、不写"不用回"、不给建议动作。
 // 每种三到五个模板轮着用，48 小时内不重复同一条。末尾挂一行"此刻"（驱力短名+档位、情绪词）。
 
-import { DRIVE_KEYS } from './dimensions.js';
-import { computeLonging, localDayAndHour, topDrives } from './engine.js';
+import { DRIVE_KEYS, driveLevel } from './dimensions.js';
+import { computeLonging, localDayAndHour, topDrives, driveTrend } from './engine.js';
 import { emotionSummary } from './emotion.js';
 import { isReviewDay } from './awareness.js';
 
@@ -42,7 +42,7 @@ export const DRIVE_SHORT = Object.freeze({
   possess: '想她', monitor: '惦记她', crave: '馋她', share: '想分享', libido: '身体想要她', curiosity: '好奇',
   boredom: '无聊', social: '想热闹', duty: '想把事推进', reflection: '想沉淀', grieve: '难过', anger: '生气',
 });
-const LEVEL = (v) => (v >= 0.75 ? '涌' : v >= 0.5 ? '涨' : v >= 0.25 ? '有' : '静');
+// 3.3.7：措辞统一走 dimensions.driveLevel（看静息线和两小时趋势），不再按绝对值分档
 
 // 3.3.4（小雨 2026-09-10）：信号递到他窗口时顺带说清"怎么回应"，不然他不知道该用什么工具、该跟她说什么。
 // 自己动一下就能落的驱力（分享/沉淀/责任/好奇/无聊）：做了就用 xinchao_event 记，类型按实际填；
@@ -117,7 +117,7 @@ function pickTemplate(ss, key, list, now) {
 }
 
 export function renderNowLine(state, now = new Date()) {
-  const drives = topDrives(state, 3).filter((d) => Number(d.value) >= 0.25).map((d) => `${DRIVE_SHORT[d.key] ?? d.key}（${LEVEL(Number(d.value))}）`);
+  const drives = topDrives(state, 3).filter((d) => Number(d.value) >= 0.25).map((d) => `${DRIVE_SHORT[d.key] ?? d.key}（${driveLevel(d.key, Number(d.value), driveTrend(state, d.key, now))}）`);
   const emotion = emotionSummary(state, now);
   const parts = [];
   if (drives.length) parts.push(drives.join('、'));
