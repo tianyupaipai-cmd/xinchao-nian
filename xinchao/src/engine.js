@@ -12,7 +12,9 @@ const CEIL_RELAX_PER_HOUR = 0.10;
 const THOUGHT_FEEDBACK_CAP = 0.85;   // 3.3.6：念头回推的驱力上限
 const RELIEF_MAX = 0.60;             // 3.3.7：一次互动最多松掉六成（以前 0.35，拉不动天花板）
 const RELIEF_PLATEAU_FROM = 0.15;
-const RELIEF_PLATEAU_MAX_HOURS = 3;
+const RELIEF_PLATEAU_MAX_HOURS = 2.5;
+const RELIEF_FLOOR_RATIO = 0.35;              // 3.3.8：松弛砍不穿 静息线×0.35
+const RELIEF_REPEAT_WINDOW_MS = 60 * 60_000;  // 3.3.8：一小时内同类互动效果减半
 const TRAIL_SAMPLE_MS = 30 * 60_000;  // 3.3.7：驱力轨迹每 30 分钟记一点，留 24 小时，给"落/涨"措辞和以后的驱力账本用
 const TRAIL_KEEP = 48;
 const TREND_LOOKBACK_MS = 2 * 3_600_000;
@@ -79,6 +81,7 @@ function ensureStateShape(state) {
     ? state.arrivalHistogram.map((n) => Number(n) || 0)
     : Array.from({ length: 24 }, () => 0);
   state.driveTrail = Array.isArray(state.driveTrail) ? state.driveTrail.slice(-TRAIL_KEEP) : [];
+  state.interactionLastAt = state.interactionLastAt && typeof state.interactionLastAt === 'object' ? state.interactionLastAt : {};
   ensureEmotion(state);
   ensureAwareness(state);
   ensureSelfSignals(state);
@@ -163,18 +166,28 @@ function applyInteractionOutcome(state, type, now, options = {}) {
 
   const effect = INTERACTION_EFFECTS[type];
   const affected = new Set();
+  // 3.3.8（09-19 修 3.3.7 的矫枉过正：一天十几次亲昵把想她砍到 0.1，平台连成片涨不回来）：
+  //  · 同类互动一小时内再来，效果减半（一场聊天里记五次 affection 不该等于五次见面）
+  //  · 松弛只作用于底线以上的部分，底线 = 静息线的 35%（想她约 0.29）——再多亲昵也砍不穿"有她"
+  //  · 平台不叠加：已有平台就不续
+  const lastSame = Date.parse(state.interactionLastAt?.[type] ?? '');
+  const repeatMul = Number.isFinite(lastSame) && now.getTime() - lastSame < RELIEF_REPEAT_WINDOW_MS ? 0.5 : 1;
   for (const [key, relief] of Object.entries(effect.relief ?? {})) {
     if (!DRIVE_KEYS.includes(key)) continue;
     const current = Number(state.drives[key] ?? 0);
-    const r = clamp(Number(relief), 0, RELIEF_MAX);
-    state.drives[key] = Number(clamp(current * (1 - r)).toFixed(4));
+    const r = clamp(Number(relief) * repeatMul, 0, RELIEF_MAX);
+    const dim = DIMENSIONS[key];
+    const floor = Number.isFinite(dim?.decayHalfLifeHours) ? 0 : RELIEF_FLOOR_RATIO * Number(dim?.ceil ?? SATURATE_CEIL);
+    const next = current > floor ? floor + (current - floor) * (1 - r) : current;
+    state.drives[key] = Number(clamp(next).toFixed(4));
     affected.add(key);
-    // 3.3.7：松得够多就进一段饱足平台（relief 0.15 → 1.2h，0.45 → 3h 封顶），期间不长，落下去的字能被看见
-    if (r >= RELIEF_PLATEAU_FROM) {
-      const hours = clamp(r * 8, 0, RELIEF_PLATEAU_MAX_HOURS);
+    const activeUntil = Date.parse(state.satisfactionPlateaus[key]?.until ?? '');
+    if (r >= RELIEF_PLATEAU_FROM && !(Number.isFinite(activeUntil) && activeUntil > now.getTime())) {
+      const hours = clamp(r * 6, 0, RELIEF_PLATEAU_MAX_HOURS);
       state.satisfactionPlateaus[key] = { startedAt: iso(now), until: iso(new Date(now.getTime() + hours * 3_600_000)), reason: `relief:${type}` };
     }
   }
+  state.interactionLastAt = { ...(state.interactionLastAt ?? {}), [type]: iso(now) };
   for (const [key, increase] of Object.entries(effect.increase ?? {})) {
     if (!DRIVE_KEYS.includes(key)) continue;
     const current = Number(state.drives[key] ?? 0);
