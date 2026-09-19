@@ -91,6 +91,7 @@ export function loadConfig() {
     },
     interaction: {
       maxEffectsPerDay: number('INTERACTION_MAX_EFFECTS_PER_DAY', 24, 1, 96),
+      classifyMinMinutes: number('INTERACTION_CLASSIFY_MIN_MINUTES', 8, 1, 240),   // 3.3.8：服务端替判互动类型的节流，和星港钩子那边一起拧（09-19 她要双向节流）
       // 3.3.4：MCP（他自己的窗口）直接填的 interaction_type 只认四种自我动作（sharing/reflection/task_progress/discovery）；
       // 关系类（陪伴/安抚/亲密/冲突/和好…）得给 exchange 让服务端从她的话里判，防止他自己说"她安抚了我"就把驱力放掉。
       mcpSelfReportGate: bool('MCP_SELF_REPORT_GATE', true),

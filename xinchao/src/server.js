@@ -870,7 +870,7 @@ async function classifyExchange(event, source = 'api') {
   if (event.interactionType || !exchange || !config.model.enabled) return null;
   const snapshot = await store.read();
   const lastAt = Date.parse(snapshot.interactionClassifyAt ?? '');
-  if (Number.isFinite(lastAt) && Date.now() - lastAt < 8 * 60_000) return { skipped: 'throttled' };
+  if (Number.isFinite(lastAt) && Date.now() - lastAt < (config.interaction?.classifyMinMinutes ?? 8) * 60_000) return { skipped: 'throttled' };
   try {
     const tag = await model.classifyInteraction(exchange);
     if (!tag) return null;
