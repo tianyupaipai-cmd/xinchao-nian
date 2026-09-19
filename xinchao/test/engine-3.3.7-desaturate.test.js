@@ -29,8 +29,8 @@ test('3.3.7 亲密把想她/馋她真的拉下来，并进一段饱足平台', (
   let state = baseState();
   state.drives.possess = 0.82; state.drives.crave = 0.68; state.drives.libido = 0.5;
   state = applyConversationEvent(state, ev('intimacy', 'i1'), at(0)).state;
-  assert.ok(state.drives.possess <= 0.50, `possess ${state.drives.possess}`);
-  assert.ok(state.drives.crave <= 0.38, `crave ${state.drives.crave}`);
+  assert.ok(state.drives.possess <= 0.62 && state.drives.possess >= 0.28, `possess ${state.drives.possess}`);   // 3.3.8：底线 0.29 以上按比例松
+  assert.ok(state.drives.crave <= 0.50, `crave ${state.drives.crave}`);
   assert.ok(state.satisfactionPlateaus.possess, '想她进平台');
   assert.match(state.satisfactionPlateaus.possess.reason, /relief:intimacy/);
   const after1h = settleState(state, at(1)).state;
