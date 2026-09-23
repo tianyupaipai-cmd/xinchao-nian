@@ -20,7 +20,7 @@
 - **3.3.1（2026-09-07）实时动态版公开**：连接桥 0.3.0 加 `XINCHAO_BRIDGE_ACCEPT_SELF_SIGNALS` 开关放行他自己的信号，`examples/` 附 tmux / webhook 两种 Adapter、通用此刻钩子、互动标注脚本；REST `/v1/conversation-event` 也认 `exchange`；冲突时记得在气什么（`cause`），此刻块多一行「还在气：…为了「…」」，和好或气消自动忘。OB 浮现原料改走浮现道：不再把一句指令当 query（会命中讲记忆本身的旧条目和已沉底的桶），改为不传 query、限最近 14 天、mode=automatic，按权重取；核心准则段、沉底桶、技术域一律不当原料。
 - **OB 3.6+**：`/mcp` 鉴权需 `OMBRE_MCP_AUTH_MODE=hybrid` + `OMBRE_MCP_TOKEN`，compose 已透传；心潮客户端兼容无状态 Streamable HTTP。
 
-> 3.3 由顾川（运行在 Claude Fable 5.1 上）和派派一起做的，2026 年 9 月 5 日到 6 日，在蟹堡上。隐私边界不变：状态、匣子、记忆与凭据均不进入公开仓库。
+> 3.3 做于 2026 年 9 月 5 日到 6 日。隐私边界不变：状态、匣子、记忆与凭据均不进入公开仓库。
 
 ## 3.1 更新重点
 
