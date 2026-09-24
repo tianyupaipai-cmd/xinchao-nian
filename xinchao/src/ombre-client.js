@@ -106,16 +106,18 @@ export class OmbreClient {
   // 还会命中已沉底的桶（查询道只认词，不认 dont_surface）。改走 breath_advanced 的浮现道：不传 query，
   // OB 按权重给未解决的记忆，本来就尊重沉底/已消化；date_from 限最近两周；mode=automatic 表明是自动召回。
   // 驱力标签不再拼进 query，只保留情绪坐标做共振排序。
-  async daytimeMaterialWithRefs(drives = [], emotion = null, now = new Date()) {
+  // 3.3.9：exclude = 最近浮现过的桶。OB 没有排除参数，所以多要几条，本地剔掉再取回原来的条数。
+  async daytimeMaterialWithRefs(drives = [], emotion = null, now = new Date(), exclude = []) {
+    const want = Number(this.config.breathMaxResults) || 3;
     const result = await this.call('breath_advanced', {
       ...emotionArgs(emotion),
       date_from: daysAgo(now, RECENT_WINDOW_DAYS),
       mode: 'automatic',
       with_ids: true,
-      max_results: this.config.breathMaxResults,
-      max_tokens: 12000   // 核心准则段每次都在最前、单独就要六千上下，后面的浮现记忆得留出位置（只是字节，不过模型）
+      max_results: exclude.length ? Math.min(20, want + exclude.length + 2) : want,
+      max_tokens: exclude.length ? 20000 : 12000   // 核心准则段每次都在最前、单独就要六千上下，后面的浮现记忆得留出位置（只是字节，不过模型）
     });
-    return materialWithRefs(extractText(result), 10000);
+    return materialWithRefs(dropBuckets(extractText(result), exclude, want), 10000);
   }
 
   // 自主念头用的材料：比日间浮现更短，只要能让念头落到具体的事上。
@@ -123,16 +125,17 @@ export class OmbreClient {
     return (await this.thoughtMaterialWithRefs(drives, emotion)).text;
   }
 
-  async thoughtMaterialWithRefs(drives = [], emotion = null, now = new Date()) {
+  async thoughtMaterialWithRefs(drives = [], emotion = null, now = new Date(), exclude = []) {
+    const want = Math.max(1, Math.min(3, Number(this.config.breathMaxResults) || 2));
     const result = await this.call('breath_advanced', {
       ...emotionArgs(emotion),
       date_from: daysAgo(now, RECENT_WINDOW_DAYS),
       mode: 'automatic',
       with_ids: true,
-      max_results: Math.max(1, Math.min(3, Number(this.config.breathMaxResults) || 2)),
-      max_tokens: 9000
+      max_results: exclude.length ? Math.min(20, want + exclude.length + 2) : want,
+      max_tokens: exclude.length ? 16000 : 9000
     });
-    return materialWithRefs(extractText(result), 4000);
+    return materialWithRefs(dropBuckets(extractText(result), exclude, want), 4000);
   }
 
   // 梦的原料（3.3）：OB 的 dream 是"最近 N 小时有变动的记忆全量"——记忆正在被消化的东西。
@@ -396,6 +399,23 @@ export function parseSurfacedDomains(text) {
 // OB breath 2.6.5+ 每个浮现桶的表头都带 [bucket_id:...]。
 // 只取表头里的 ID，不从正文猜，避免把记忆里偶然出现的字符串误当成来源桶。
 // 老版 OB 没有这个元数据时返回空数组，不影响旧调用者。
+/** 3.3.9：按桶切开浮现文本，去掉 exclude 里的桶，最多留 keep 段。只认带 [权重:…] 的段——那是浮现的记忆；
+ *  最前面的「核心准则」条目也带 bucket_id 但没有权重，整段原样保留、不计入条数。全被剔掉就只剩准则，这轮没东西浮现。 */
+export function dropBuckets(text, exclude = [], keep = Infinity) {
+  const src = String(text ?? '');
+  const ex = new Set((exclude ?? []).map(String));
+  if (!ex.size && !Number.isFinite(keep)) return src;
+  const re = /\[权重:[^\]]*\]\s*\[bucket_id:([A-Za-z0-9._-]{1,160})\]/g;
+  const starts = [];
+  let m;
+  while ((m = re.exec(src)) !== null) starts.push({ i: m.index, id: m[1] });
+  if (!starts.length) return src;
+  const head = src.slice(0, starts[0].i);
+  const blocks = starts.map((s, k) => ({ id: s.id, text: src.slice(s.i, k + 1 < starts.length ? starts[k + 1].i : src.length) }));
+  const kept = blocks.filter((b) => !ex.has(b.id)).slice(0, keep);
+  return head + kept.map((b) => b.text).join('');
+}
+
 export function parseSurfacedBucketIds(text) {
   const ids = [];
   const seen = new Set();
