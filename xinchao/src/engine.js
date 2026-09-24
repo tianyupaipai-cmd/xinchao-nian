@@ -81,6 +81,7 @@ function ensureStateShape(state) {
     ? state.arrivalHistogram.map((n) => Number(n) || 0)
     : Array.from({ length: 24 }, () => 0);
   state.driveTrail = Array.isArray(state.driveTrail) ? state.driveTrail.slice(-TRAIL_KEEP) : [];
+  state.surfacedBuckets = state.surfacedBuckets && typeof state.surfacedBuckets === 'object' && !Array.isArray(state.surfacedBuckets) ? state.surfacedBuckets : {};   // 3.3.9：桶 → 上次浮现时间
   state.interactionLastAt = state.interactionLastAt && typeof state.interactionLastAt === 'object' ? state.interactionLastAt : {};
   ensureEmotion(state);
   ensureAwareness(state);
@@ -281,17 +282,47 @@ export function applySurfacedThought(input, driveKey, text, now = new Date(), am
 }
 
 // 浮现的记忆落到哪一维：按 domain 亲和度取最强的一维；没有就用当前最强驱力。
+// 3.3.9：浮现念头挂在哪一维——按亲和度从高到低，跳过已经「涌」的维（高出自己静息线 0.05 或 ≥0.90）。
+// 原来永远挂亲和度最高的那维：「内心」→沉淀 0.8 几乎每段记忆都带，沉淀维静息线最低、回落又慢，
+// 于是一直被念头往上堆、一直是「涌」，驱力提示也一直挑它。都在涌就还挂最高的那维。
 export function surfacedDriveKey(domains = [], state = null) {
-  let best = null;
+  const merged = {};
   for (const raw of domains) {
     const map = DOMAIN_AFFINITY[String(raw ?? '').trim()];
     if (!map) continue;
     for (const [key, value] of Object.entries(map)) {
       if (!DRIVE_KEYS.includes(key)) continue;
-      if (!best || value > best.value) best = { key, value };
+      merged[key] = Math.max(merged[key] ?? 0, Number(value) || 0);
     }
   }
-  return best?.key ?? (state ? (topDrives(state, 1)[0]?.key ?? null) : null);
+  const ranked = Object.entries(merged).sort((a, b) => b[1] - a[1]).map(([key]) => key);
+  if (!ranked.length) return state ? (topDrives(state, 1)[0]?.key ?? null) : null;
+  if (!state) return ranked[0];
+  const surging = (key) => {
+    const v = Number(state.drives?.[key] ?? 0);
+    const ceil = Number(DIMENSIONS[key]?.ceil ?? SATURATE_CEIL);
+    return v >= 0.90 || v >= ceil + 0.05;
+  };
+  return ranked.find((key) => !surging(key)) ?? ranked[0];
+}
+
+// 3.3.9：同一段记忆 72 小时内不再浮现。OB 不带关键词时按权重返回，同样的情绪坐标每次都捞到同一段，
+// 同一个闪念连着几天冒出来、还被升成「持续念头」——那是检索单调，不是真的放不下。
+export const SURFACE_COOLDOWN_HOURS = 72;
+export function recentSurfacedBucketIds(state, now = new Date(), hours = SURFACE_COOLDOWN_HOURS) {
+  const since = new Date(now).getTime() - hours * 3_600_000;
+  return Object.entries(state?.surfacedBuckets ?? {})
+    .filter(([, at]) => Date.parse(at) >= since)
+    .map(([id]) => id);
+}
+export function recordSurfacedBuckets(input, ids = [], now = new Date(), hours = SURFACE_COOLDOWN_HOURS) {
+  const state = structuredClone(input);
+  const since = new Date(now).getTime() - hours * 3_600_000;
+  const kept = Object.entries(state.surfacedBuckets ?? {}).filter(([, at]) => Date.parse(at) >= since);
+  state.surfacedBuckets = Object.fromEntries(kept);
+  for (const id of ids) if (id) state.surfacedBuckets[String(id)] = iso(now);
+  state.revision = (state.revision ?? 0) + 1;
+  return state;
 }
 
 export function newState(now = new Date()) {

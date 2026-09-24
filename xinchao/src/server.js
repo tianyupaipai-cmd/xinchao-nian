@@ -5,7 +5,7 @@ import { emotionCoords, emotionSummary, stampEmotionArgs } from './emotion.js';
 import { recordSurfacing, resolveAwareness, scanAwareness, awarenessSummary } from './awareness.js';
 import { detectSelfSignals, renderNowLine, SELF_REPORT_TYPES } from './self-signals.js';
 import { BlackBox, renderBoxList } from './black-box.js';
-import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour, applySurfacedThought, surfacedDriveKey } from './engine.js';
+import { INTERACTION_TYPES, applyDriveFeedback, applyMemoryResonance, applyOmbreHeartbeat, applyOutputReflux, applyLongingNudge, barkAllowed, breathDreamContext, contactIdleAllowed, computeLonging, daytimeEmergenceAllowed, dreamAllowed, newState, pickIntent, proactiveBarkAllowed, recordBark, recordDaytimeEmergence, recordDream, scheduleDaytimeEmergence, settleAndApplyConversationEvent, settleState, topDrives, computeAnticipation, localDayAndHour, applySurfacedThought, surfacedDriveKey, recentSurfacedBucketIds, recordSurfacedBuckets } from './engine.js';
 import { buildInteractionBridgeMessage } from './interaction-messages.js';
 import { selectUniqueBark } from './bark-dedupe.js';
 import { StateStore } from './state-store.js';
@@ -358,8 +358,12 @@ async function runCycle() {
       let thoughtSourceBucketIds = [];
       if (config.ombre.readEnabled) {
         try {
-          const recalled = await ombre.thoughtMaterialWithRefs(topDrives(state), emotionForOmbre(state));
+          const recalled = await ombre.thoughtMaterialWithRefs(topDrives(state), emotionForOmbre(state), now, recentSurfacedBucketIds(state, now));
           thoughtSourceBucketIds = recalled.bucketIds;
+          if (recalled.bucketIds.length) {
+            state = await updateState({ type: 'surfaced_buckets', source: 'autonomous', details: { count: recalled.bucketIds.length }, at: now },
+              (latest) => recordSurfacedBuckets(latest, recalled.bucketIds, now));
+          }
           thoughtMaterial = await materialFromReferencedBuckets(recalled, 5);
         }
         catch (error) { log('ombre_read_failed', { message: error.message }); }
@@ -447,7 +451,11 @@ async function runCycle() {
     } else if (!config.shadowMode && config.daytime.enabled && config.ombre.readEnabled && (!config.daytime.bark || config.bark.enabled) && daytimeEmergenceAllowed(state, now, config.daytime)) {
       let selected = { message: '', candidate: { source: 'none' }, reason: 'empty', attempts: 1 };
       try {
-        const recalled = await ombre.daytimeMaterialWithRefs(topDrives(state), emotionForOmbre(state));
+        const recalled = await ombre.daytimeMaterialWithRefs(topDrives(state), emotionForOmbre(state), now, recentSurfacedBucketIds(state, now));
+        if (recalled.bucketIds.length) {
+          state = await updateState({ type: 'surfaced_buckets', source: 'daytime', details: { count: recalled.bucketIds.length }, at: now },
+            (latest) => recordSurfacedBuckets(latest, recalled.bucketIds, now));
+        }
         const material = await materialFromReferencedBuckets(recalled, 5);
         if (config.resonance.enabled && material) {
           const domains = parseSurfacedDomains(material);
