@@ -1,3 +1,6 @@
+// 【记忆（OB）】读 OB 的心跳文件，判断记忆服务还活着没有。
+// 代码地图见 src/README.md。
+
 import { readFile } from 'node:fs/promises';
 
 /** Read the content-free timestamp written by Ombre's POST /heartbeat route. */

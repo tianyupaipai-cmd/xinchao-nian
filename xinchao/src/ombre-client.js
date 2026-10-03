@@ -1,3 +1,6 @@
+// 【记忆（OB）】和 Ombre Brain 记忆服务打交道：拉浮现的记忆、写回、解析记忆桶。部署时 OB 要先起来。
+// 代码地图见 src/README.md。
+
 import { SYSTEM_VERSION } from './version.js';
 
 // 梦不吃技术：这些域的记忆不进梦的原料（机房梦就是这么来的）

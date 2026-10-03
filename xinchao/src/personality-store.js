@@ -1,3 +1,6 @@
+// 【引擎】人格内核：月度自我回顾写下的性格维度，换算成各驱力的长期偏置。详见 docs/PERSONALITY-CORE.md。
+// 代码地图见 src/README.md。
+
 import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';

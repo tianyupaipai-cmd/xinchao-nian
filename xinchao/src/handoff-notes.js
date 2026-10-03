@@ -1,3 +1,6 @@
+// 【记忆（OB）】交接便签：上一个窗口留给下一个窗口的话，开窗时带上。
+// 代码地图见 src/README.md。
+
 import { createHash } from 'node:crypto';
 
 const MAX_NOTES = 32;

@@ -1,3 +1,6 @@
+// 【连接桥与推送】连接桥的投递队列：心潮想主动说的话先排队，桥来取再送进 AI 窗口。配合 bridge/ 子模块。
+// 代码地图见 src/README.md。
+
 import { randomUUID } from 'node:crypto';
 import { StateStore } from './state-store.js';
 

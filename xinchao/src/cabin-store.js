@@ -1,3 +1,6 @@
+// 【小屋与留言板】小屋：人和 AI 互相写信（可上锁）、一起记的小账本。
+// 代码地图见 src/README.md。
+
 import { randomUUID } from 'node:crypto';
 import { StateStore } from './state-store.js';
 

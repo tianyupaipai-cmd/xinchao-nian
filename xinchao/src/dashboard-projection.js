@@ -1,3 +1,6 @@
+// 【网页与看板】给平台网页的快照：网页只读这里给出的字段。字段格式是网页和各家心潮之间的约定。
+// 代码地图见 src/README.md。
+
 import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
 import { buildConnectionDiagnostics } from './connection-diagnostics.js';
 import { emotionSummary } from './emotion.js';

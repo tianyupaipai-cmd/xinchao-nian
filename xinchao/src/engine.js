@@ -1,3 +1,6 @@
+// 【引擎】驱力的核心计算：每 15 分钟结算一次涨落、互动事件怎么推驱力、饱和与去饱和、冲突记仇、浮现。
+// 代码地图见 src/README.md。
+
 import { createHash } from 'node:crypto';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL } from './dimensions.js';
 import { newThoughtPool, tickThoughtPool, addFlashThought, obsessionBonus, reinforceThought, SURFACED_DECAY, DREAM_DECAY } from './thought-pool.js';

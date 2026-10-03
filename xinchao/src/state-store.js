@@ -1,3 +1,6 @@
+// 【服务底座】状态文件的读写：原子写入、加锁，避免结算和请求同时改坏 state.json。
+// 代码地图见 src/README.md。
+
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 

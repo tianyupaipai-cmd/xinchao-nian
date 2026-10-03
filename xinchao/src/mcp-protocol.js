@@ -1,3 +1,6 @@
+// 【连接 AI】MCP 工具清单和处理：AI 能调用的每一个 xinchao_* 工具都在这里定义。
+// 代码地图见 src/README.md。
+
 import { SYSTEM_VERSION } from './version.js';
 import { PERSONALITY_DIMENSIONS } from './personality-store.js';
 

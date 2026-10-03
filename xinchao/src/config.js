@@ -1,3 +1,6 @@
+// 【服务底座】读环境变量：所有可调的开关和数值都从 .env 进来，对照 .env.example 看。
+// 代码地图见 src/README.md。
+
 function bool(name, fallback = false) {
   const raw = process.env[name];
   return raw == null ? fallback : ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());

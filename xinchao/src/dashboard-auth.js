@@ -1,3 +1,6 @@
+// 【网页与看板】看板登录：网页读快照时的令牌校验。
+// 代码地图见 src/README.md。
+
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const COOKIE_NAME = 'xinchao_dashboard';

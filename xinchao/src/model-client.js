@@ -1,3 +1,6 @@
+// 【连接 AI】调用小模型的客户端：给互动打标签、写梦、写月度回顾时用。模型和 key 在 .env 里配。
+// 代码地图见 src/README.md。
+
 import { readFileSync } from 'node:fs';
 
 export class ModelClient {

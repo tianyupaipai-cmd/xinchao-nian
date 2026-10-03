@@ -1,3 +1,6 @@
+// 【引擎】驱力维度表：每一股驱力的名字、增长速度、衰减、上限、领域亲和。改驱力先看这里。
+// 代码地图见 src/README.md。
+
 export const SATURATE_CEIL  = 0.80;
 export const SATURATE_FLOOR = 0.65;
 

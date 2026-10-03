@@ -1,3 +1,6 @@
+// 【连接桥与推送】推送去重：同样意思的话短时间内不重复推。
+// 代码地图见 src/README.md。
+
 import { barkDuplicateCheck, recentBarkHistory } from './engine.js';
 
 export async function selectUniqueBark({ state, generate, maxAttempts = 2, onRejected = null }) {

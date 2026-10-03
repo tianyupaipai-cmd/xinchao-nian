@@ -1,3 +1,6 @@
+// 【连接桥与推送】Bark 推送客户端：给人的手机发通知（iOS）。不用 Bark 可以不配。
+// 代码地图见 src/README.md。
+
 export class BarkClient {
   constructor(config) { this.config = config; }
 

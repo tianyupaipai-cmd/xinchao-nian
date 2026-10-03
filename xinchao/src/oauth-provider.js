@@ -1,3 +1,6 @@
+// 【连接 AI】给 Claude.ai MCP 连接器用的 OAuth 登录。只用官方客户端时可以不管。
+// 代码地图见 src/README.md。
+
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';

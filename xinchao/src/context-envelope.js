@@ -1,3 +1,6 @@
+// 【连接 AI】开窗时给 AI 的那一包上下文：此刻的驱力、情绪、记仇、待办、小屋提示，按 token 预算裁剪。
+// 代码地图见 src/README.md。
+
 import { createHash } from 'node:crypto';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives, driveTrend } from './engine.js';
 import { emotionSummary, emotionNuance, renderEmotion, renderEmotionTrend } from './emotion.js';

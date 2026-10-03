@@ -1,3 +1,6 @@
+// 【服务底座】HTTP 服务入口：所有接口的路由、定时结算、把上面各块接到一起。
+// 代码地图见 src/README.md。
+
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadConfig, validateConfig } from './config.js';

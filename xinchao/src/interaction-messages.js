@@ -1,3 +1,6 @@
+// 【连接 AI】互动事件发生后推给 AI 的那一句话（例如"想她的劲儿落下去一点"）。
+// 代码地图见 src/README.md。
+
 import { DIMENSIONS } from './dimensions.js';
 
 // 键必须与 engine.js 的 INTERACTION_TYPES 完全一致 —— 少一个会掉进兜底句，
