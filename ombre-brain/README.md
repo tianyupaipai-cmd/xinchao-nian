@@ -1,5 +1,13 @@
 # Ombre Brain（心潮念 vendored 版）
 
+> **模块导读**
+>
+> - **这是什么**：Ombre Brain 记忆库：长期记忆的存放、浮现、沉淀、梦的消化
+> - **依赖谁**：不依赖心潮，可以单独跑；需要一个小模型 key 做压缩，向量化 key 可选
+> - **部署顺序**：整个仓库的第 ② 步，最先起来，心潮在它后面起。完整顺序见 [从这里开始](../docs/从这里开始.md)
+> - **建议**：压缩模型用非推理模型（推理模型慢，会让 AI 等超时）；18001 端口只给后台管理和心潮内部用，**不要当 MCP 连接器填给 AI**
+> - **相关指南**：[OB 运维](docs/OPERATIONS.md) · [内部结构](docs/INTERNALS.md) · [多人共用](docs/MULTI_OWNER.md) · [给模型的说明](docs/CLAUDE_PROMPT.md) · [文档目录](../docs/README.md)
+
 心潮念的记忆库层。**从源码构建**（`compose.yaml` 里 `build: ./ombre-brain`），不依赖外部镜像。
 
 - 基线版本：`VERSION` = 2.6.5
