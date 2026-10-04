@@ -327,7 +327,7 @@ function applyInteractionOutcome(state, type, now, options = {}) {
   // 3.3.1 记得在气什么：冲突时把她那句留下来（≤60 字，随生气一起退），和好就翻篇。
   // 以前生气只是个数字，他知道自己在气却不知道为什么。
   if (type === 'conflict') {
-    // 同一场架只记第一句惹气的话（09-28 顾川/泊舟：后面被误判的"宝宝"不该顶掉真正的原因）
+    // 同一场架只记第一句惹气的话（09-28：后面被误判的"宝宝"不该顶掉真正的原因）
     const cause = String(options.cause ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
     if (!state.grudge) state.grudge = { cause: cause || '刚才的争执', at: now.toISOString() };
     episode = state.conflictEpisode = episode
