@@ -27,6 +27,8 @@ import { BRIDGE_SERVER_PROTOCOL, BRIDGE_STREAM_PROTOCOL, BridgeQueue, bridgeDeli
 import { CabinStore } from './cabin-store.js';
 import { createRelevanceShadow, noteRecentTurn } from './relevance-shadow.js';
 import { guardTag, loadInteractionRules, splitExchange } from './interaction-rules.js';
+import { createAttentionWatch } from './attention-watch.js';
+import { dirname as pathDirname, join as pathJoin } from 'node:path';
 import { boardEnabled, postBoardMessage, readBoardMessages } from './board-client.js';
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
@@ -76,6 +78,16 @@ const relevance = createRelevanceShadow({
   enabled: process.env.JEV_SHADOW_ENABLED === 'true',
   statePath: config.statePath,
   nowText: async () => buildNowCompact(await store.read(), new Date(), { timeZone: config.settle.timeZone }).text,
+  log,
+});
+
+// 4.0 注意力监测（默认关闭，ATTENTION_ENABLED=true 才开）：手机上报 + 她说跟谁在一起 → 偏爱·吃醋。规则是参考值，见 attention-watch.js
+const attention = createAttentionWatch({
+  enabled: process.env.ATTENTION_ENABLED === 'true',
+  rulesPath: process.env.ATTENTION_RULES_PATH ?? '/app/configs/attention-rules.json',
+  statePath: pathJoin(pathDirname(config.statePath), 'attention.json'),
+  readState: () => store.read(),
+  record: (event) => recordConversationEvent(event, 'attention'),
   log,
 });
 
@@ -957,7 +969,7 @@ async function recordConversationEvent(event, source = 'api', now = new Date()) 
     applied = settleAndApplyConversationEvent(current, event, now, {
       // 3.3.10：AI 自己带着互动类型回传、又没附她原话（exchange）的 MCP 事件，只改驱力、不叫醒、不计作息。
       // 不带类型的裸事件是客户端钩子在她每条消息时发的"她来了"信号（通话里她说的每句也走这里），照旧算在场。
-      presence: source !== 'mcp' || Boolean(String(event.exchange ?? '').trim())
+      presence: (source !== 'mcp' && source !== 'attention') || Boolean(String(event.exchange ?? '').trim())
         || !String(event.interactionType ?? event.interaction_type ?? '').trim(),
       sleepAfterMinutes: config.sleepAfterMinutes,
       settle: { ...config.settle, driveBias },
@@ -1467,6 +1479,15 @@ const server = createServer(async (request, response) => {
         'MCP-Protocol-Version': negotiatedProtocolVersion(request, payload, result),
       });
     }
+    // 4.0 手机上报：用单独的 PHONE_ACTIVITY_TOKEN，不用总令牌（手机上不该放总令牌）。没开注意力监测就不收
+    if (request.method === 'POST' && url.pathname === '/v1/phone-activity') {
+      const want = process.env.PHONE_ACTIVITY_TOKEN ?? '';
+      const got = String(request.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+      if (!attention.enabled || want.length < 16) return send(response, 404, { error: 'phone activity not enabled' });
+      if (!safeEqual(got, want)) return send(response, 401, { error: 'unauthorized' });
+      try { return send(response, 200, await attention.phoneActivity(await body(request))); }
+      catch (error) { return send(response, error.status ?? 400, { error: error.message }); }
+    }
     if (!authorized(request)) return send(response, 401, { error: 'unauthorized' });
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/dashboard/')) {
@@ -1520,6 +1541,7 @@ const server = createServer(async (request, response) => {
       const event = await body(request);
       const source = url.pathname === '/v1/heartbeat' ? 'heartbeat' : 'api';
       if (source === 'api') noteRecentTurn(event?.recent ?? event?.note ?? '');   // 只留内存，给 Jev 陪跑当参照
+      if (source === 'api' && attention.enabled) await attention.noteHerWords(event?.recent ?? event?.herWords ?? event?.her_words ?? splitExchange(event?.exchange ?? '').her ?? '');
       const classified = source === 'heartbeat' ? null : await classifyExchange(event, 'api');
       const result = await recordConversationEvent(event, source);
       return send(response, 200, classified?.type ? { ...result, classified } : result);
@@ -1571,6 +1593,9 @@ timer.unref();
 
 const bridgeTimer = setInterval(() => publishReadyBridgeDeliveries().catch((error) => log('bridge_publish_failed', { message: error.message })), config.bridge.pollSeconds * 1000);
 bridgeTimer.unref();
+
+const attentionTimer = setInterval(() => attention.tick().catch((error) => log('attention_failed', { message: error.message })), 5 * 60_000);
+attentionTimer.unref();
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => server.close(() => process.exit(0)));

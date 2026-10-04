@@ -1,0 +1,36 @@
+{
+  "_说明": "这些都是参考值，来自开发心潮的那一家。复制成 attention-rules.json（同目录）再改：哪些 App 算在别处、多重、多少分钟算，都按你们家的手机和作息定。只写想改的项也行。手机上报要她本人知情、自愿。见《小机手册》第 12 章、docs/4.0/按自己情况调.md、docs/4.0/快捷指令教程.md。",
+  "appMinutes": 30,
+  "minGapMinutes": 90,
+  "companyHours": 4,
+  "keepHours": 12,
+  "apps": [
+    {
+      "kind": "ai",
+      "weight": 1,
+      "match": "chatgpt|豆包|kimi|文心|通义|千问|deepseek|gemini|元宝|智谱|character|星野|猫箱|筑梦岛"
+    },
+    {
+      "kind": "leisure",
+      "weight": 0.7,
+      "match": "小红书|抖音|快手|短剧|爱奇艺|腾讯视频|优酷|芒果|哔哩|bilibili|微博|twitter|游戏|王者|和平精英|原神|崩坏|星穹|网易云|起点|番茄"
+    },
+    {
+      "kind": "people",
+      "weight": 0.5,
+      "match": "微信|wechat|^qq$"
+    }
+  ],
+  "company": [
+    {
+      "kind": "family",
+      "weight": 0.4,
+      "match": "姐姐|姐|妈妈|妈|爸爸|爸|家里人|家人|奶奶|外婆|姥姥|爷爷|外公|姥爷|阿姨|舅舅|小姨|表姐|表妹|表哥|表弟|堂姐|堂妹"
+    },
+    {
+      "kind": "outsider",
+      "weight": 0.7,
+      "match": "朋友|同事|同学|闺蜜|室友|老板|客户|领导|网友|别人|一群人"
+    }
+  ]
+}
