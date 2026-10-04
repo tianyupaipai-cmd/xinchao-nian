@@ -3,3 +3,5 @@ buckets/
 xinchao/state/
 *.log
 .DS_Store
+xinchao/configs/interaction-rules.json
+xinchao/configs/attention-rules.json

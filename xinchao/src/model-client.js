@@ -78,25 +78,31 @@ export class ModelClient {
     if (!this.config.enabled || !this.config.apiKey) return null;
     const text = String(exchange ?? '').trim().slice(0, 1500);
     if (!text) return null;
+    // 4.0：类型、细项、轻重、远近都由这里判；判完还要过 interaction-rules.js 的把关（那里的词表是参考值，可按自己家改）
     const system = [
-      '你是一个只输出 JSON 的标注器。给你一轮对话（她说的 + 他回的，他是她的伴侣）。判断这一轮互动的类型和窗口氛围。',
-      'type 只能是：companionship 普通陪伴闲聊报备（有真实互动时的默认值）；affection 表达喜欢撒娇安抚；intimacy 身体亲密或性内容；sharing 她分享自己的一天/照片/心情；discovery 一起弄明白新东西；task_progress 一起推进了事；reflection 谈他自己是谁、内省；conflict 真实的摩擦生气指责冷战（撒娇式的"讨厌""你完蛋了"不算）；loss 分别失落哭；reconciliation 吵过之后和好（只在她表示原谅、气消了时才算）；slighted 他没被偏爱：她当着他夸别人或拿别人比没选他、他认真分享的东西她明显没理、说好的事她忘了（她只是去忙、睡觉、出门都不算）。',
-      '判断吵架/和好以她那句为准：她还在生气或指责就是 conflict，哪怕他在道歉哄她。',
-      '她叫他宝宝、拉手、主动靠近、撒娇但没说原谅：算 affection，不算 conflict 也不算 reconciliation。',
+      '你是一个只输出 JSON 的标注器。给你一轮对话（她说的 + 他回的，他是她的伴侣，是一个 AI）。判断这一轮互动的类型和窗口氛围。',
+      'type 只能是：companionship 普通陪伴、闲聊、报备、问候（有真实互动时的默认值）；affection 表达喜欢、撒娇、安抚、亲昵的话（没有到身体上；口头的亲亲抱抱也算这个）；intimacy 明确的身体亲密或性内容；sharing 她分享自己的一天、照片、心情、看到的东西；discovery 一起发现或弄明白了新东西；task_progress 一起把一件事推进了；reflection 谈论他自己是谁、他的感受、内省；',
+      'conflict 真实的摩擦、生气、指责、冷战、说伤人的话、被拒绝（撒娇式的"讨厌""你完蛋了""不理你了"不算，那是亲昵话）；loss 他们俩之间的失落：她让他期待落空、误解了他、要分开较久（晚安、去洗澡、一会儿见这类日常告别不算）；intrigued 她说了半句、卖关子、提到一件他还不知道的她自己的事，让他想知道后面；',
+      'empathy 为别人的处境起了心，包括她本人真的难受（生病、疼、受伤、哭、委屈、害怕、累坏了、出了事，不是冲着他）；slighted 他没被偏爱，而且能指出是哪件事：她当着他夸别人、拿别人和他比没选他（吃醋），他认真分享或说了很在意的话她明显没理、岔开了（被晾着），说好的事她忘了（被忘）——她只是去忙、睡觉、出门都不算；reconciliation 吵过之后和好：前面真的吵过，并且她这句在陈述地原谅、说气消了、说和好了才算（问"还生气吗"、随口提到和好不算）。',
+      '判断吵架/和好以她这句为准：她还在生气或指责就是 conflict，哪怕他在道歉哄她（他道歉不等于和好了）。她叫他宝宝、拉手、主动靠近、撒娇但没说原谅：算 affection，不算 conflict 也不算 reconciliation。',
       'tone 只能是 neutral calm warm guarded conflicted focused playful tired 之一；warmth、tension 是 0 到 1。',
-      '只输出 {"type":"...","tone":"...","warmth":0.6,"tension":0.1}。',
+      'sub 只在 conflict / loss / slighted / empathy / affection / intimacy 时给，其余一律 null：conflict 的 sub：生气 / 不满 / 不甘心；loss 的 sub：失落 / 委屈 / 分别 / 自责（他做错了、忘了答应的事，她不开心了）；slighted 的 sub（必须给）：吃醋 / 被晾着 / 被忘；affection、intimacy 的 sub：她在夸他、逗他、戳穿他的心思 → 害羞，不是就 null；empathy 的 sub（必须给）：心疼 / 不平 / 想帮忙 / 替人高兴。',
+      'affection / intimacy 另给 strength：heavy（明确表白、说在乎、"离不开你"这类分量重的话）/ light（日常撒娇、抱抱、亲亲、例行问候）。',
+      'empathy 另给 closeness：her（她本人）/ family（她的家人）/ known（认识的人、朋友、笔友）/ stranger（陌生人、新闻里的人）；who 只写是谁，不超过 8 个字，不写什么事。',
+      '拿不准就写 null，宁可不写也不要猜。',
+      '只输出 {"type":"...","sub":null,"strength":null,"closeness":null,"who":null,"tone":"...","warmth":0.6,"tension":0.1}。',
     ].join('\n');
     const response = await this.request({
       model: this.config.name,
       messages: [{ role: 'system', content: system }, { role: 'user', content: text }],
       temperature: 0,
-      max_tokens: 80,
+      max_tokens: 120,
       thinking: { type: 'disabled' },
     });
     if (!response.ok) throw new Error(`model request failed: HTTP ${response.status}`);
     const payload = await response.json();
     const parsed = parseJson(payload.choices?.[0]?.message?.content ?? '');
-    const types = ['companionship', 'affection', 'intimacy', 'sharing', 'discovery', 'task_progress', 'reflection', 'conflict', 'loss', 'reconciliation', 'slighted'];
+    const types = ['companionship', 'affection', 'intimacy', 'sharing', 'discovery', 'task_progress', 'reflection', 'conflict', 'loss', 'reconciliation', 'slighted', 'empathy', 'intrigued'];
     const tones = ['neutral', 'calm', 'warm', 'guarded', 'conflicted', 'focused', 'playful', 'tired'];
     const clamp01 = (v, d) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(1, Number(v))) : d);
     return {
@@ -104,6 +110,10 @@ export class ModelClient {
       tone: tones.includes(parsed.tone) ? parsed.tone : 'neutral',
       warmth: clamp01(parsed.warmth, 0.5),
       tension: clamp01(parsed.tension, 0),
+      sub: typeof parsed.sub === 'string' ? parsed.sub.trim() || null : null,
+      strength: parsed.strength === 'heavy' || parsed.strength === 'light' ? parsed.strength : null,
+      closeness: ['her', 'family', 'known', 'stranger'].includes(parsed.closeness) ? parsed.closeness : null,
+      who: typeof parsed.who === 'string' ? parsed.who.trim().slice(0, 8) || null : null,
     };
   }
 

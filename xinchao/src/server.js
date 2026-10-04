@@ -26,6 +26,7 @@ import { buildConnectionManifest, buildDashboardSnapshot } from './dashboard-pro
 import { BRIDGE_SERVER_PROTOCOL, BRIDGE_STREAM_PROTOCOL, BridgeQueue, bridgeDeliveryFromDashboard } from './bridge-queue.js';
 import { CabinStore } from './cabin-store.js';
 import { createRelevanceShadow, noteRecentTurn } from './relevance-shadow.js';
+import { guardTag, loadInteractionRules, splitExchange } from './interaction-rules.js';
 import { boardEnabled, postBoardMessage, readBoardMessages } from './board-client.js';
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
@@ -892,6 +893,16 @@ async function createContextEnvelope({
 // 没填类型但给了 exchange（她的一句 + 他的一段）→ 服务端替接收端判互动类型和氛围。
 // MCP（官方客户端版）和 REST /v1/conversation-event（自建运行时）共用；8 分钟内不重复判，和 PaiHome 钩子的节流一致。
 // exchange 正文只走这一跳：判完即删，不进状态、不进审计。
+// 4.0：互动判断的把关规则（词表、远近名单都是参考值）。每家可以在 configs/interaction-rules.json 覆盖，一分钟重读一次
+const RULES_PATH = process.env.INTERACTION_RULES_PATH ?? '/app/configs/interaction-rules.json';
+let rulesCache = { at: 0, rules: null };
+function interactionRules() {
+  if (!rulesCache.rules || Date.now() - rulesCache.at > 60_000) rulesCache = { at: Date.now(), rules: loadInteractionRules(RULES_PATH) };
+  return rulesCache.rules;
+}
+const recentClassified = [];   // 最近判过的类型（只在内存里，给「刚亲近完」「被晾着要有前文」这几道门用）
+const MARK_TYPES = new Set(['affection', 'intimacy', 'empathy', 'loss', 'conflict', 'slighted']);
+
 async function classifyExchange(event, source = 'api') {
   if (event.interactionType === undefined && event.interaction_type !== undefined) event.interactionType = event.interaction_type;
   // cause：她那句让他不痛快的话（≤60 字），只在冲突时有意义；接收端可以直接给，也可以由 exchange 里截出来
@@ -905,9 +916,20 @@ async function classifyExchange(event, source = 'api') {
   const lastAt = Date.parse(snapshot.interactionClassifyAt ?? '');
   if (Number.isFinite(lastAt) && Date.now() - lastAt < (config.interaction?.classifyMinMinutes ?? 8) * 60_000) return { skipped: 'throttled' };
   try {
-    const tag = await model.classifyInteraction(exchange);
-    if (!tag) return null;
+    const raw = await model.classifyInteraction(exchange);
+    if (!raw) return null;
+    const { her } = splitExchange(exchange);
+    const nowMs = Date.now();
+    while (recentClassified.length && nowMs - recentClassified[0].at > 30 * 60_000) recentClassified.shift();
+    const tag = guardTag(raw, her, { rules: interactionRules(), recent: [...recentClassified], hasGrudge: Boolean(snapshot.grudge), now: nowMs });
+    recentClassified.push({ type: tag.type, at: nowMs });
+    while (recentClassified.length > 3) recentClassified.shift();
     event.interactionType = tag.type;
+    if (tag.sub) event.sub = tag.sub;
+    if (tag.strength && (tag.type === 'affection' || tag.type === 'intimacy')) event.strength = tag.strength;
+    if (tag.type === 'empathy') { event.closeness = tag.closeness; if (tag.who) event.who = tag.who; }
+    // 浮标点开看到的是她这句原话的前 40 字（网页开了私密文字才显示）
+    if (MARK_TYPES.has(tag.type) && !event.note) event.note = her.slice(0, 40);
     event.sessionState = { ...(event.sessionState ?? event.session_state ?? {}), tone: tag.tone, warmth: tag.warmth, tension: tag.tension };
     if (tag.type === 'conflict' && !event.cause) {
       const her = exchange.match(/她说：(.+?)(?:\s*他回：|$)/);
@@ -915,8 +937,8 @@ async function classifyExchange(event, source = 'api') {
     }
     await updateState({ type: 'interaction_classified', source, details: { type: tag.type, tone: tag.tone }, at: new Date() },
       (current) => ({ ...current, interactionClassifyAt: new Date().toISOString() }));
-    log('interaction_classified', { type: tag.type, tone: tag.tone, source });
-    return { type: tag.type, tone: tag.tone };
+    log('interaction_classified', { type: tag.type, tone: tag.tone, source, ...(tag.sub ? { sub: tag.sub } : {}), ...(tag.guarded ? { guarded: tag.guarded } : {}) });
+    return { type: tag.type, tone: tag.tone, ...(tag.sub ? { sub: tag.sub } : {}), ...(tag.guarded ? { guarded: tag.guarded } : {}) };
   } catch (error) { log('interaction_classify_failed', { message: error.message }); return null; }
 }
 
