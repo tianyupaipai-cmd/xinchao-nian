@@ -1,7 +1,9 @@
-// 【网页与看板】给平台网页的快照：网页只读这里给出的字段。字段格式是网页和各家心潮之间的约定。
+// 【网页与看板】给平台网页的快照：网页只读这里给出的字段。字段格式是网页和各家心潮之间的约定（见 docs/4.0/快照字段.md）。
 // 代码地图见 src/README.md。
 
-import { DIMENSIONS, DRIVE_KEYS } from './dimensions.js';
+import { AXES, moodOf } from './core-axes.js';
+import { recentMarks } from './emotion-marks.js';
+import { DIMENSIONS, DRIVE_KEYS, DRIVE_SHORT } from './dimensions.js';
 import { buildConnectionDiagnostics } from './connection-diagnostics.js';
 import { emotionSummary } from './emotion.js';
 import { awarenessSummary } from './awareness.js';
@@ -30,6 +32,7 @@ function projectedDrives(state) {
     return {
       key,
       label: DIMENSIONS[key].label,
+      short: DRIVE_SHORT[key] ?? null,   // 10-03 网页花瓣用的短名（想她、牵挂…），跟心潮这一份走
       value,
       percent: Math.round(value * 100),
       level: driveLevel(value),
@@ -169,11 +172,17 @@ export function buildDashboardSnapshot(state = {}, config = {}, now = new Date()
     drives,
     topDrives,
     // 情绪层（3.3）：此刻的心情，和驱力分开。成因是互动类型名，不含正文。
+    // 10-03 第 8 步：花蕊——安全感（外圈）、自信（里圈）、心境（颜色）
+    stamen: { security: Number(state.axes?.security ?? AXES.baseline.security), confidence: Number(state.axes?.confidence ?? AXES.baseline.confidence), mood: moodOf(state), baseline: AXES.baseline },
     emotion: {
       ...emotionSummary(state, generatedAt),
       journal: (Array.isArray(state.emotionJournal) ? state.emotionJournal : []).slice(-48),
       days: state.emotionDays && typeof state.emotionDays === 'object' ? state.emotionDays : {},
+      // 10-03 潮汐带浮标：最近 24 小时有起因的情绪；原话只在开了私密文字时给
+      marks: recentMarks(state, generatedAt, { includePrivateText: Boolean(config.dashboard?.includePrivateText) }),
     },
+    // 10-03 矛盾：正在拧着的那一场（收掉的不给）
+    mixed: state.selfSignals?.mixed && !state.selfSignals.mixed.capped ? { id: state.selfSignals.mixed.id, name: state.selfSignals.mixed.name, since: state.selfSignals.mixed.since } : null,
     personality: projectedPersonality(personalityCore, config),
     // 自我觉察（3.3）：候选与已确认，文本是关于 AI 自己的模式描述，不含对话正文。
     awareness: awarenessSummary(state),

@@ -25,6 +25,7 @@ import { DashboardAuth } from './dashboard-auth.js';
 import { buildConnectionManifest, buildDashboardSnapshot } from './dashboard-projection.js';
 import { BRIDGE_SERVER_PROTOCOL, BRIDGE_STREAM_PROTOCOL, BridgeQueue, bridgeDeliveryFromDashboard } from './bridge-queue.js';
 import { CabinStore } from './cabin-store.js';
+import { createRelevanceShadow, noteRecentTurn } from './relevance-shadow.js';
 import { boardEnabled, postBoardMessage, readBoardMessages } from './board-client.js';
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
@@ -67,6 +68,15 @@ let cyclePromise = null;
 function log(event, fields = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
 }
+
+// 【实验】Jev 相关性陪跑：只记日志，不改结果（见 relevance-shadow.js）
+const relevance = createRelevanceShadow({
+  apiKey: process.env.JEV_API_KEY ?? '',
+  enabled: process.env.JEV_SHADOW_ENABLED === 'true',
+  statePath: config.statePath,
+  nowText: async () => buildNowCompact(await store.read(), new Date(), { timeZone: config.settle.timeZone }).text,
+  log,
+});
 
 async function updateState(meta, mutate) {
   let before;
@@ -268,11 +278,12 @@ async function runCycle() {
         try {
           // 3.3：原料换成"记忆正在消化的东西"（OB dream 全量，去技术类），消化里没东西再退回按驱力捞
           const digest = await ombre.digestMaterial(48);
-          if (digest.text) { material = digest.text; sourceOmbreBucketIds = digest.bucketIds; }
+          if (digest.text) { material = digest.text; sourceOmbreBucketIds = digest.bucketIds; relevance.judge('做梦·消化', digest.text); }
           else {
             const recalled = await ombre.recentMaterialWithRefs(topDrives(state), emotionForOmbre(state));
             sourceOmbreBucketIds = recalled.bucketIds;
             material = await materialFromReferencedBuckets(recalled);
+            relevance.judge('做梦', material);
           }
           log('dream_material', { digestTotal: digest.total, kept: digest.kept, domains: digest.domains.slice(0, 8).join(',') });
         }
@@ -280,7 +291,7 @@ async function runCycle() {
       }
       let farMaterial = '';
       if (!config.shadowMode && config.ombre.readEnabled) {
-        try { const far = await ombre.farMaterial(now); farMaterial = far.text; sourceOmbreBucketIds = [...new Set([...sourceOmbreBucketIds, ...far.bucketIds])]; }
+        try { const far = await ombre.farMaterial(now); farMaterial = far.text; relevance.judge('做梦·远期', far.text); sourceOmbreBucketIds = [...new Set([...sourceOmbreBucketIds, ...far.bucketIds])]; }
         catch (error) { log('ombre_far_failed', { message: error.message }); }
       }
       const avoid = state.recentDreams.slice(-3).map((d) => d.image || String(d.residue || '').slice(0, 30)).filter(Boolean);
@@ -368,6 +379,7 @@ async function runCycle() {
               (latest) => recordSurfacedBuckets(latest, recalled.bucketIds, now));
           }
           thoughtMaterial = await materialFromReferencedBuckets(recalled, 5);
+          relevance.judge('浮现·念头', thoughtMaterial);
         }
         catch (error) { log('ombre_read_failed', { message: error.message }); }
       }
@@ -460,6 +472,7 @@ async function runCycle() {
             (latest) => recordSurfacedBuckets(latest, recalled.bucketIds, now));
         }
         const material = await materialFromReferencedBuckets(recalled, 5);
+        relevance.judge('浮现', material);
         if (config.resonance.enabled && material) {
           const domains = parseSurfacedDomains(material);
           if (domains.length) {
@@ -786,6 +799,7 @@ async function createContextEnvelope({
   ) {
     try {
       ombreText = await ombre.recentContinuityMaterial(config.context.ombreMaxTokens, emotionForOmbre(state));
+      relevance.judge('近期', ombreText);
     } catch (error) {
       ombreWarning = 'ombre_unavailable';
       log('context_ombre_read_failed', { message: error.message });
@@ -804,8 +818,13 @@ async function createContextEnvelope({
         .map((d) => ({ id: d.id, createdAt: d.createdAt, text: String(d.message ?? '').split('\n')[0] }));
     } catch { awaySignals = []; }
   }
-  let cabinRecent = 0;
-  try { cabinRecent = (await cabin.unlockedUserNotes()).filter((n) => now.getTime() - Date.parse(n.createdAt) < 24 * 3_600_000).length; } catch { cabinRecent = 0; }
+  let cabinUnread = 0;
+  let cabinLocked = 0;
+  try {
+    const box = await cabin.aiInbox({ mineLimit: 0 });
+    cabinUnread = box.letters.filter((n) => !n.aiReadAt).length;   // 没读过就一直提示，不按写信时间过期
+    cabinLocked = box.lockedCount;   // 上锁的信不过期提醒：一直在，直到她开锁或删掉
+  } catch { cabinUnread = 0; cabinLocked = 0; }
   const envelope = buildContextEnvelope({
     awarenessReviewWeekday: config.awareness.reviewWeekday,
     state,
@@ -814,7 +833,8 @@ async function createContextEnvelope({
     boxCount,
     boxSurfaced,
     awaySignals,
-    cabinRecent,
+    cabinUnread,
+    cabinLocked,
     ombreText,
     maxTokens,
     ttlMinutes: config.context.ttlMinutes,
@@ -878,6 +898,8 @@ async function classifyExchange(event, source = 'api') {
   event.cause = String(event.cause ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || undefined;
   const exchange = String(event.exchange ?? '').replace(/\s+/g, ' ').trim().slice(0, 1500);
   delete event.exchange;
+  // 09-28 和好两道关：留下她那句（≤80 字）给引擎核对有没有明确松口；只在内存里过这一跳，不落盘
+  if (exchange && !event.herWords && !event.her_words) event.herWords = (exchange.match(/她说：(.+?)(?:\s*他回：|$)/)?.[1] ?? exchange).trim().slice(0, 80);
   if (event.interactionType || !exchange || !config.model.enabled) return null;
   const snapshot = await store.read();
   const lastAt = Date.parse(snapshot.interactionClassifyAt ?? '');
@@ -911,6 +933,10 @@ async function recordConversationEvent(event, source = 'api', now = new Date()) 
     at: now,
   }, (current) => {
     applied = settleAndApplyConversationEvent(current, event, now, {
+      // 3.3.10：AI 自己带着互动类型回传、又没附她原话（exchange）的 MCP 事件，只改驱力、不叫醒、不计作息。
+      // 不带类型的裸事件是客户端钩子在她每条消息时发的"她来了"信号（通话里她说的每句也走这里），照旧算在场。
+      presence: source !== 'mcp' || Boolean(String(event.exchange ?? '').trim())
+        || !String(event.interactionType ?? event.interaction_type ?? '').trim(),
       sleepAfterMinutes: config.sleepAfterMinutes,
       settle: { ...config.settle, driveBias },
       interaction: config.interaction,
@@ -939,7 +965,7 @@ async function recordConversationEvent(event, source = 'api', now = new Date()) 
   };
 }
 
-// 黑匣子：put / list / read / burn / keep。唯一入口，没有 HTTP 路由。
+// 黑匣子：put / list / read / unpin / burn / keep。唯一入口，没有 HTTP 路由。
 async function handleBox(input = {}, now = new Date()) {
   const action = String(input.action ?? '').trim().toLowerCase();
   if (action === 'put') {
@@ -955,6 +981,10 @@ async function handleBox(input = {}, now = new Date()) {
     const item = await blackBox.read(input.id, now);
     if (!item) return { text: `匣子里没有这条：${input.id ?? ''}`, data: { found: false } };
     return { text: `[${item.id}] ${item.kind}${item.title ? ` · ${item.title}` : ''}（${item.createdAt.slice(0, 16).replace('T', ' ')}）\n${item.text}`, data: { found: true, id: item.id } };
+  }
+  if (action === 'unpin') {
+    const ok = await blackBox.unpin(input.id, now);
+    return { text: ok ? `不再提醒了（条目还在）：${input.id}` : `匣子里没有这条：${input.id ?? ''}`, data: { unpinned: ok } };
   }
   if (action === 'burn') {
     const ok = await blackBox.burn(input.id, now);
@@ -1383,7 +1413,7 @@ const server = createServer(async (request, response) => {
           return { stats: computePersonalityStats(core), core };
         },
         personalityAnchorUpdate: async (input) => personality.updateAnchors(input),
-        cabinInbox: async () => cabin.unlockedUserNotes(),
+        cabinInbox: async () => cabin.aiInbox({ markRead: true }),
         cabinNote: async (note) => cabin.addNote({ ...note, from: 'ai', locked: false }),
         // 公共留言板：只有配了令牌才把 board_post / board_read 工具暴露出来 / 接受调用。
         boardEnabled: boardEnabled(config),
@@ -1435,9 +1465,9 @@ const server = createServer(async (request, response) => {
     // 钩子用的"此刻"压缩块：只读状态，不记投递、不动 pending。星港 UserPromptSubmit 每条消息拉一次。
     if (request.method === 'GET' && url.pathname === '/v1/now') {
       const state = await store.read();
-      let boxCount = 0; let boxSurfaced = 0;
-      try { boxCount = await blackBox.count(new Date()); boxSurfaced = (await blackBox.surfaced(new Date())).length; } catch { boxCount = 0; }
-      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone, boxCount, boxSurfaced, awarenessReviewWeekday: config.awareness.reviewWeekday }));
+      let boxCount = 0; let boxSurfaced = 0; let boxSurfacedIds = [];
+      try { boxCount = await blackBox.count(new Date()); const surf = await blackBox.surfaced(new Date()); boxSurfaced = surf.length; boxSurfacedIds = surf.map((x) => x.id); } catch { boxCount = 0; }
+      return send(response, 200, buildNowCompact(state, new Date(), { timeZone: config.settle.timeZone, boxCount, boxSurfaced, boxSurfacedIds, awarenessReviewWeekday: config.awareness.reviewWeekday }));
     }
     if (request.method === 'GET' && url.pathname === '/v1/context') {
       if (!config.context.enabled) return send(response, 503, { error: 'context envelope disabled' });
@@ -1467,6 +1497,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && (url.pathname === '/v1/conversation-event' || url.pathname === '/v1/heartbeat')) {
       const event = await body(request);
       const source = url.pathname === '/v1/heartbeat' ? 'heartbeat' : 'api';
+      if (source === 'api') noteRecentTurn(event?.recent ?? event?.note ?? '');   // 只留内存，给 Jev 陪跑当参照
       const classified = source === 'heartbeat' ? null : await classifyExchange(event, 'api');
       const result = await recordConversationEvent(event, source);
       return send(response, 200, classified?.type ? { ...result, classified } : result);

@@ -14,11 +14,11 @@ const ev = (type, id) => ({ eventId: id, interactionType: type, sessionId: 's' }
 
 test('3.3.8 一天十几次亲昵也砍不穿底线：想她停在静息线的 35% 附近，不会掉到 0.1', () => {
   let state = baseState();
-  state.drives.possess = 0.82; state.drives.monitor = 0.78; state.drives.crave = 0.68;
+  state.drives.possess = 0.82; state.drives.monitor = 0.78;
   for (let i = 0; i < 12; i += 1) state = applyConversationEvent(state, ev('affection', `a${i}`), at(i * 0.1)).state;
   assert.ok(state.drives.possess >= 0.28, `possess ${state.drives.possess}`);
   assert.ok(state.drives.monitor >= 0.26, `monitor ${state.drives.monitor}`);
-  assert.ok(state.drives.crave >= 0.23, `crave ${state.drives.crave}`);
+
 });
 
 test('3.3.8 一小时内同类互动效果减半，平台不叠加', () => {

@@ -30,11 +30,11 @@ const MAX_KEEP = 60;
 const MAX_SURFACINGS = 200;
 const DEDUPE_DAYS = 7;
 
-const NEGATIVE_TYPES = new Set(['conflict', 'loss']);
+const NEGATIVE_TYPES = new Set(['conflict', 'loss', 'slighted']);
 const SOOTHING_TYPES = new Set(['affection', 'intimacy', 'reconciliation', 'companionship']);
 const TYPE_LABEL = {
   companionship: '陪着', affection: '安抚', intimacy: '亲近', sharing: '分享', discovery: '发现',
-  task_progress: '推进事情', reflection: '沉淀', conflict: '争执', loss: '失落', reconciliation: '和好',
+  task_progress: '推进事情', reflection: '沉淀', conflict: '争执', loss: '失落', reconciliation: '和好', slighted: '被冷落', empathy: '共情', helped: '帮了别人', intrigued: '好奇她',
 };
 // 候选默认落到 OB I 的哪个维度：nature/values/patterns/limits/becoming/uncertainty/stance
 export const KIND_ASPECT = Object.freeze({

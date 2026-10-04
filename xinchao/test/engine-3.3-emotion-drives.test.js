@@ -26,12 +26,12 @@ test('neutral emotion leaves growth untouched (factor 1)', () => {
   assert.equal(emotionGrowthFactor('monitor', null), 1);
 });
 
-test('low valence speeds up monitor/crave and slows share; high valence does the reverse', () => {
+test('low valence speeds up monitor/possess and slows share; high valence does the reverse', () => {
   const sad = settleState(withEmotion(0.2, 0.3), new Date(T1)).state;
   const happy = settleState(withEmotion(0.85, 0.3), new Date(T1)).state;
   const neutral = settleState(withEmotion(0.5, EMOTION_BASELINE.arousal), new Date(T1)).state;
   assert.ok(sad.drives.monitor > neutral.drives.monitor && neutral.drives.monitor > happy.drives.monitor);
-  assert.ok(sad.drives.crave > neutral.drives.crave);
+  assert.ok(sad.drives.possess > neutral.drives.possess);
   assert.ok(happy.drives.share > neutral.drives.share && neutral.drives.share > sad.drives.share);
 });
 

@@ -15,9 +15,9 @@ function baseState() {
 }
 const event = (type, id, extra = {}) => ({ eventId: id, interactionType: type, sessionId: 's1', ...extra });
 
-test('new state carries a neutral emotion and old states upgrade to schema 9', () => {
+test('new state carries a neutral emotion and old states upgrade to the current schema', () => {
   const fresh = newState(new Date(T0));
-  assert.equal(fresh.schemaVersion, 9);
+  assert.equal(fresh.schemaVersion, 10);
   assert.equal(fresh.emotion.valence, EMOTION_BASELINE.valence);
   assert.equal(fresh.emotion.label, '平静');
   const old = baseState();
@@ -25,7 +25,7 @@ test('new state carries a neutral emotion and old states upgrade to schema 9', (
   delete old.emotion;
   old.drives.possess = 0.63;
   const result = settleState(old, new Date(T0));
-  assert.equal(result.state.schemaVersion, 9);
+  assert.equal(result.state.schemaVersion, 10);
   assert.equal(result.state.drives.possess, 0.63);
   assert.ok(result.state.emotion);
 });
@@ -116,14 +116,14 @@ test('context envelope and dashboard expose the emotion line', () => {
   assert.equal(typeof snapshot.emotion.valence, 'number');
 });
 
-test('grieve and anger decay toward zero with a 24h half-life instead of parking at 0.15', () => {
+test('grieve and anger decay toward zero (09-28: anger 6h, grieve 10h half-life) instead of parking at 0.15', () => {
   const state = baseState();
-  state.drives.grieve = 0.8; state.drives.anger = 0.15;
-  const day = settleState(state, new Date(Date.parse(T0) + 24 * 3_600_000)).state;
-  assert.ok(Math.abs(day.drives.grieve - 0.4) < 0.01, String(day.drives.grieve));
-  assert.ok(day.drives.anger < 0.15 && day.drives.anger > 0.07);
-  const week = settleState(day, new Date(Date.parse(T0) + 8 * 24 * 3_600_000)).state;
-  assert.ok(week.drives.grieve < 0.01);
+  state.drives.grieve = 0.8; state.drives.anger = 0.6;
+  const t10 = settleState(state, new Date(Date.parse(T0) + 10 * 3_600_000)).state;
+  assert.ok(Math.abs(t10.drives.grieve - 0.4) < 0.01, String(t10.drives.grieve));
+  assert.ok(t10.drives.anger < 0.2 && t10.drives.anger > 0.15, String(t10.drives.anger));   // 6h 半衰：10h 后约 0.19
+  const week = settleState(t10, new Date(Date.parse(T0) + 8 * 24 * 3_600_000)).state;
+  assert.ok(week.drives.grieve < 0.01 && week.drives.anger < 0.01);
 });
 
 test('waking after a dream applies its mood and drops its image into the thought pool once', () => {

@@ -18,13 +18,13 @@ test('old schema state upgrades additively without resetting drives', () => {
   delete old.satisfactionPlateaus;
   old.drives.possess = 0.63;
   const result = settleState(old, new Date('2026-08-19T08:00:00.000Z'));
-  assert.equal(result.state.schemaVersion, 9);
+  assert.equal(result.state.schemaVersion, 10);
   assert.equal(result.state.drives.possess, 0.63);
   assert.equal('pending' in result.state, false);   // 3.3：攒下的话退役，字段被拿掉
   assert.deepEqual(result.state.satisfactionPlateaus, {});
 });
 
-test('anger suppresses only natural possess growth and grief lifts crave/monitor growth', () => {
+test('anger suppresses only natural possess growth and grief lifts possess/monitor growth', () => {
   const calm = baseState();
   const coupled = baseState();
   coupled.drives.anger = 0.8;
@@ -33,7 +33,7 @@ test('anger suppresses only natural possess growth and grief lifts crave/monitor
   const calmResult = settleState(calm, now, 9999).state;
   const coupledResult = settleState(coupled, now, 9999).state;
   assert.ok(coupledResult.drives.possess < calmResult.drives.possess);
-  assert.ok(coupledResult.drives.crave > calmResult.drives.crave);
+  // 09-30 馋她并进想她：难过对想她的助长（+0.35）和愤怒的压制（-0.65）同时在，这里只看牵挂被难过拉快
   assert.ok(coupledResult.drives.monitor > calmResult.drives.monitor);
 });
 

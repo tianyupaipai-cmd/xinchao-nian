@@ -45,15 +45,17 @@ test('day digest aggregates in Asia/Shanghai days and prunes old days', () => {
 
 test('trend line appears in envelope once emotion has moved, and dashboard exposes journal', () => {
   let state = baseState();
+  // 10-03 情绪有惯性：底色待满 10 分钟才换，所以事件之间隔开一点
   state = applyConversationEvent(state, ev('conflict', 't1'), at(0)).state;
-  state = applyConversationEvent(state, ev('reconciliation', 't2'), at(1)).state;
-  state = applyConversationEvent(state, ev('intimacy', 't3'), at(2)).state;
-  const trend = emotionTrend(state, at(2));
+  state = applyConversationEvent(state, ev('conflict', 't1b'), at(0.25)).state;
+  state = applyConversationEvent(state, ev('reconciliation', 't2'), at(0.5)).state;
+  state = applyConversationEvent(state, ev('intimacy', 't3'), at(1)).state;
+  const trend = emotionTrend(state, at(1));
   assert.ok(trend.labels.length >= 2);
   assert.match(renderEmotionTrend(trend), /近24小时情绪走过：/);
-  const envelope = buildContextEnvelope({ state, sessionId: 's1', now: at(2) });
+  const envelope = buildContextEnvelope({ state, sessionId: 's1', now: at(1) });
   assert.match(envelope.sections[0].content, /情绪走过/);
-  const snapshot = buildDashboardSnapshot(state, {}, at(2));
+  const snapshot = buildDashboardSnapshot(state, {}, at(1));
   assert.ok(Array.isArray(snapshot.emotion.journal) && snapshot.emotion.journal.length >= 2);
   assert.ok(snapshot.emotion.days['2026-09-05']);
 });

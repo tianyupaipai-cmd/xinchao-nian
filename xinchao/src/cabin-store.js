@@ -71,6 +71,7 @@ export class CabinStore {
       notes,
       ledger,
       unreadAiNotes: notes.filter((note) => note.from === 'ai' && !note.readAt).length,
+      aiUnreadUserNotes: notes.filter((note) => note.from === 'user' && !note.locked && !note.aiReadAt).length,
       totals: totals(ledger),
     };
   }
@@ -135,6 +136,28 @@ export class CabinStore {
       return state;
     });
     return { changed };
+  }
+
+  // 给 AI 的收件箱：开了锁的来信 + 自己写过的回信（换窗口后知道回没回过）+ 上锁信只给数量和最近时间，不给正文。
+  // markRead：AI 真的打开信箱读了，就把这次读到的来信记成 AI 已读（aiReadAt），开窗提示按"没读过"算，不按写信时间算。
+  async aiInbox({ mineLimit = 10, markRead = false } = {}, now = new Date()) {
+    const newest = (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
+    let state;
+    if (markRead) {
+      await this.store.update((raw) => {
+        const live = normalize(raw);
+        state = structuredClone(live);   // 返回的是读之前的样子，这次新读到的会标"（新）"
+        for (const n of live.notes) if (n.from === 'user' && !n.locked && !n.aiReadAt) n.aiReadAt = now.toISOString();
+        return live;
+      });
+    } else state = normalize(await this.store.read());
+    const letters = state.notes.filter((n) => n.from === 'user' && !n.locked).sort(newest)
+      .map(({ id, content, createdAt, unlockedAt, aiReadAt }) => ({ id, content, createdAt, unlockedAt, aiReadAt: aiReadAt ?? null }));
+    const mine = state.notes.filter((n) => n.from === 'ai').sort(newest).slice(0, mineLimit)
+      .map(({ id, content, createdAt, readAt }) => ({ id, content, createdAt, readAt }));
+    const locked = state.notes.filter((n) => n.from === 'user' && n.locked).sort(newest);
+    return { letters, mine, lockedCount: locked.length, lockedLatestAt: locked[0]?.createdAt ?? null };
+
   }
 
   async unlockedUserNotes() {

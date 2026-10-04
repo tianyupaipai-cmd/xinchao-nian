@@ -19,6 +19,10 @@ export const INTERACTION_BRIDGE_MESSAGES = Object.freeze({
   conflict: '刚刚明确表达了一次冲突，需要在下次连接时被看见',
   loss: '刚刚回应了你的难过，愿意陪你一起承受',
   reconciliation: '刚刚主动回应了一次和解',
+  slighted: '刚刚让你觉得没被偏爱，需要在下次连接时被看见',
+  empathy: '刚刚和你说起了别人的事',
+  helped: '刚刚陪你一起帮了别人',
+  intrigued: '刚刚说了半句，留了个想让你问下去的口子',
 });
 
 const FALLBACK_ACTION = '刚刚从心潮小屋发来一次互动';

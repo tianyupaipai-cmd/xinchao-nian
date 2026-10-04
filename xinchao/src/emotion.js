@@ -15,6 +15,9 @@
 //   3. grieve / anger 两个驱力在结算时把"回落目标"往下拽——难过着的时候，平静不是平静。
 // 情绪不直接改驱力（那是第四步的事），也不自激：每次结算只做指数回落，没有增长项。
 
+import { subOf } from './mixed-feelings.js';
+import { recordMark } from './emotion-marks.js';
+
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, Number(value) || 0));
 const round4 = (value) => Number(clamp(value).toFixed(4));
 const iso = (value) => new Date(value).toISOString();
@@ -38,6 +41,8 @@ export const INTERACTION_EMOTION = Object.freeze({
   conflict:       { valence: -0.18, arousal: +0.20 },
   loss:           { valence: -0.15, arousal: -0.05 },
   reconciliation: { valence: +0.14, arousal: -0.05 },
+  slighted:       { valence: -0.10, arousal: +0.06 },
+  intrigued:      { valence: +0.03, arousal: +0.08 },
 });
 
 // 会话 tone → 情绪落点。neutral 不拉。
@@ -56,6 +61,7 @@ const TONE_BLEND = 0.15;
 const DRIVE_PULL = Object.freeze({
   grieve: { valence: -0.35, arousal: -0.05 },
   anger:  { valence: -0.25, arousal: +0.30 },
+  favored: { valence: -0.15, arousal: +0.10 },
 });
 
 export function newEmotion(now = new Date()) {
@@ -78,12 +84,42 @@ export function ensureEmotion(state, now = new Date()) {
   }
   current.valence = round4(current.valence);
   current.arousal = round4(current.arousal);
-  current.label = emotionLabel(current.valence, current.arousal);
+  // 10-03：底色有惯性，已经有的词不在这里重算（迁移进来的没有词才补）
+  if (!current.label) current.label = emotionLabel(current.valence, current.arousal);
   current.lastCause = current.lastCause ? String(current.lastCause).slice(0, 80) : null;
   current.lastCauseAt = current.lastCauseAt ?? null;
   current.updatedAt = current.updatedAt ?? iso(now);
   ensureEmotionJournal(state);
   return current;
+}
+
+// 10-03 复盘：情绪别跳太快。底色换格子要么在新格子里待满 10 分钟，要么已经深入新格子 0.1 以上（真大起落不拖）；
+// 起因情绪亮了至少挂 15 分钟，只有更高一级的新起因能盖掉。
+export const INERTIA = Object.freeze({ baseHoldMin: 10, margin: 0.10, causeHoldMin: 15 });
+function deepIn(v, a, label) {
+  const m = INERTIA.margin;
+  return [[v + m, a], [v - m, a], [v, a + m], [v, a - m]].every(([x, y]) => emotionLabel(clamp(x), clamp(y)) === label);
+}
+// 写状态的地方用：算出这一刻该显示的底色，顺手记"待换"
+export function stepBaseLabel(e, now = new Date()) {
+  const cand = emotionLabel(e.valence, e.arousal);
+  const cur = e.label;
+  if (!cur || cand === cur || deepIn(e.valence, e.arousal, cand)) { e.pendingLabel = null; return cand; }
+  if (e.pendingLabel?.label === cand) {
+    if (now.getTime() - Date.parse(e.pendingLabel.since) >= INERTIA.baseHoldMin * 60_000) { e.pendingLabel = null; return cand; }
+    return cur;
+  }
+  e.pendingLabel = { label: cand, since: iso(now) };
+  return cur;
+}
+// 只读的地方用：待换的已经满 10 分钟就当换了
+function readBaseLabel(e, now = new Date()) {
+  const cand = emotionLabel(e.valence, e.arousal);
+  if (!e.label || cand === e.label) return cand;
+  // 每次写状态都会把"待换"记下来；没有待换记录说明坐标是从别处直接改的（迁移、测试），就信坐标
+  if (!e.pendingLabel) return cand;
+  if (e.pendingLabel.label === cand && now.getTime() - Date.parse(e.pendingLabel.since) >= INERTIA.baseHoldMin * 60_000) return cand;
+  return e.label;
 }
 
 // 二维落到一个词上。给上下文信封和 Dashboard 用；模型看词，不看数。
@@ -123,13 +159,14 @@ export function applyEmotionImpulse(state, impulse = {}, cause = '', now = new D
   const inertia = (value, delta) => (delta > 0 ? delta * (1 - value) * 1.6 : delta * value * 1.6);
   emotion.valence = round4(emotion.valence + inertia(emotion.valence, dv));
   emotion.arousal = round4(emotion.arousal + inertia(emotion.arousal, da));
-  emotion.label = emotionLabel(emotion.valence, emotion.arousal);
+  emotion.label = stepBaseLabel(emotion, now);
   emotion.updatedAt = iso(now);
   if (cause) {
     emotion.lastCause = String(cause).slice(0, 80);
     emotion.lastCauseAt = iso(now);
   }
   const changed = emotion.valence !== before.valence || emotion.arousal !== before.arousal;
+  holdCause(state, now);
   if (changed) recordEmotionSample(state, now, { cause });
   return { changed, emotion, applied: { valence: round4(emotion.valence - before.valence + 0.5) - 0.5, arousal: round4(emotion.arousal - before.arousal + 0.5) - 0.5 } };
 }
@@ -142,7 +179,7 @@ export function blendEmotionTowardTone(state, tone, now = new Date(), weight = T
   const before = { valence: emotion.valence, arousal: emotion.arousal };
   emotion.valence = round4(emotion.valence + (target.valence - emotion.valence) * weight);
   emotion.arousal = round4(emotion.arousal + (target.arousal - emotion.arousal) * weight);
-  emotion.label = emotionLabel(emotion.valence, emotion.arousal);
+  emotion.label = stepBaseLabel(emotion, now);
   emotion.updatedAt = iso(now);
   return { changed: emotion.valence !== before.valence || emotion.arousal !== before.arousal, emotion };
 }
@@ -157,7 +194,8 @@ export function settleEmotion(state, elapsedHours = 0, options = {}) {
   const before = { valence: emotion.valence, arousal: emotion.arousal, label: emotion.label };
   emotion.valence = round4(decay(emotion.valence, target.valence, VALENCE_HALF_LIFE_HOURS));
   emotion.arousal = round4(decay(emotion.arousal, target.arousal, AROUSAL_HALF_LIFE_HOURS));
-  emotion.label = emotionLabel(emotion.valence, emotion.arousal);
+  emotion.label = stepBaseLabel(emotion, options.now ?? new Date());
+  holdCause(state, options.now ?? new Date());
   const changed = emotion.valence !== before.valence || emotion.arousal !== before.arousal || emotion.label !== before.label;
   const sampled = recordEmotionSample(state, options.now ?? new Date(), { timeZone: options.timeZone }).recorded;
   return { changed: changed || sampled, emotion, target };
@@ -169,18 +207,107 @@ export function emotionSummary(state, now = new Date()) {
     trend: emotionTrend(state, now, 24),
     valence: round4(emotion.valence),
     arousal: round4(emotion.arousal),
-    label: emotionLabel(emotion.valence, emotion.arousal),
+    label: readBaseLabel(emotion, now),
+    shown: shownEmotion(state, now) ?? readBaseLabel(emotion, now),   // 10-02：给人看的那个词（有起因就是起因情绪）
     updatedAt: emotion.updatedAt ?? null,
     lastCause: emotion.lastCause ?? null,
     lastCauseAt: emotion.lastCauseAt ?? null,
   };
 }
 
+// ── 10-02 情绪线第二层：有起因的情绪 ──────────────────────────────
+// 底色还是愉悦×唤醒落的八格；有具体起因时，显示起因情绪本身（她定：只写「心疼」，不带底色）。
+//   · 事件点亮（有寿命）：她亲昵 → 心动（她在夸他/逗他/戳穿他 → 害羞）；他做成了事 → 得意；她做成了事 → 骄傲。
+//   · 跟着驱力细项（驱力落了就灭）：生气/不平、委屈/心疼/自责、吃醋；想她很高又往下走 → 想念；牵挂很高又往下走 → 不安。
+//   · 先后：半小时内刚点亮的 > 负面细项（取最强那瓣）> 想念 > 不安 > 还在寿命里的点亮 > 底色。坐标对不上不亮。
+export const LIT_MINUTES = Object.freeze({ 心动: 60, 害羞: 30, 得意: 60, 骄傲: 60 });
+// 10-03 复盘：心动太容易亮。亲昵分轻重——重的（表白、说在乎、亲密）一次就亮；轻的（日常撒娇、问候）
+// 30 分钟内攒够 3 次才亮。同一天第 n 次亮心动/害羞，时长 ×0.6^(n-1)，最短 15 分钟。
+export const HEART = Object.freeze({ lightNeeded: 3, lightWindowMin: 30, decay: 0.6, minMinutes: 15 });
+function shDay(now) {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
+  catch { return iso(now).slice(0, 10); }
+}
+export function lightEmotion(state, type, { sub, closeness, strength } = {}, now = new Date()) {
+  const e = state.emotion;
+  if (!e) return;
+  let word = null;
+  if (type === 'affection' || type === 'intimacy') {
+    const heavy = type === 'intimacy' || strength === 'heavy' || sub === '害羞';
+    if (!heavy) {
+      const since = now.getTime() - HEART.lightWindowMin * 60_000;
+      const taps = [...(e.lightTaps ?? []).filter((t) => Date.parse(t) >= since), iso(now)];
+      if (taps.length < HEART.lightNeeded) { e.lightTaps = taps; return; }
+    }
+    e.lightTaps = [];
+    word = sub === '害羞' ? '害羞' : '心动';
+  } else if ((type === 'task_progress' || type === 'discovery') && Number(state.axes?.confidence ?? 1) >= 0.35) word = '得意';   // 没底气时得意亮不起来
+  else if (type === 'empathy' && sub === '替人高兴' && closeness === 'her') word = '骄傲';
+  if (!word) return;
+  let minutes = LIT_MINUTES[word];
+  if (word === '心动' || word === '害羞') {
+    const day = shDay(now);
+    const n = (e.heartDay?.day === day ? Number(e.heartDay.n) : 0) + 1;
+    e.heartDay = { day, n };
+    minutes = Math.max(HEART.minMinutes, Math.round(minutes * Math.pow(HEART.decay, n - 1)));
+  }
+  e.lit = { word, at: iso(now), minutes };
+  // 10-03 浮标：轻的心动攒够了才亮、得意亮起——这时才在情绪线上记一笔（重的心动、害羞在事件那里已经记过）
+  const heavyHeart = (type === 'affection' || type === 'intimacy') && (type === 'intimacy' || strength === 'heavy' || sub === '害羞');
+  if ((word === '心动' && !heavyHeart) || word === '得意') recordMark(state, word, 2, { type: 'state' }, now);
+  holdCause(state, now);
+}
+
+function rawShown(state, now = new Date()) {
+  const e = state?.emotion;
+  if (!e) return null;
+  const v = Number(e.valence);
+  const d = state.drives ?? {};
+  const age = e.lit ? (now.getTime() - Date.parse(e.lit.at)) / 60_000 : Infinity;
+  const lit = e.lit && age >= 0 && age < (e.lit.minutes ?? LIT_MINUTES[e.lit.word] ?? 0) && v >= 0.5 ? e.lit.word : null;
+  if (lit && age < 30) return { word: lit, prio: 4 };
+  if (v <= 0.55) {
+    const neg = [['anger', Number(d.anger ?? 0)], ['grieve', Number(d.grieve ?? 0)], ['favored', Number(d.favored ?? 0)]]
+      .filter(([, x]) => x >= 0.25).sort((a, b) => b[1] - a[1]);
+    for (const [key] of neg) {
+      const s = subOf(state, key, now);
+      if (key === 'anger') return { word: s === '不平' ? '不平' : '生气', prio: 3 };
+      if (key === 'grieve' && ['委屈', '心疼', '自责', '失落'].includes(s)) return { word: s, prio: 3 };
+      if (key === 'grieve' && s === '分别') return { word: '舍不得', prio: 3 };   // 10-03：失落、舍不得也有起因
+      if (key === 'favored' && s === '吃醋') return { word: '吃醋', prio: 3 };
+    }
+  }
+  if (v <= 0.48 && Number(d.possess ?? 0) >= 0.60) return { word: '想念', prio: 2 };
+  if (v <= 0.55 && Number(state.axes?.security ?? 1) < 0.35) return { word: '不安', prio: 1 };   // 10-03：不安改跟安全感走
+  return lit ? { word: lit, prio: 0.5 } : null;
+}
+
+// 写状态的地方用：记下正在挂着的起因情绪（换了词才重新计时）
+export function holdCause(state, now = new Date()) {
+  const e = state?.emotion;
+  if (!e) return;
+  const raw = rawShown(state, now);
+  const held = e.heldCause;
+  const fresh = held && now.getTime() - Date.parse(held.since) < INERTIA.causeHoldMin * 60_000;
+  if (raw && (!fresh || raw.prio >= held.prio)) {
+    if (held?.word !== raw.word && (raw.word === '想念' || raw.word === '不安')) recordMark(state, raw.word, 2, { type: 'state' }, now);   // 10-03 浮标：慢慢积起来的这两种，换上时记一笔
+    e.heldCause = held?.word === raw.word ? { ...held, prio: raw.prio } : { word: raw.word, prio: raw.prio, since: iso(now) };
+  }
+  else if (!raw && !fresh) e.heldCause = null;
+}
+
+export function shownEmotion(state, now = new Date()) {
+  const raw = rawShown(state, now);
+  const held = state?.emotion?.heldCause;
+  if (held && now.getTime() - Date.parse(held.since) < INERTIA.causeHoldMin * 60_000 && (!raw || raw.prio < held.prio)) return held.word;
+  return raw?.word ?? null;
+}
+
 // 给上下文信封的一行。模型看到的是词和成因，数值放括号里作参考。
 export function renderEmotion(summary) {
   if (!summary) return '';
   const cause = summary.lastCause ? `，最近一次波动来自「${summary.lastCause}」` : '';
-  return `此刻情绪：${summary.label}（愉悦=${summary.valence.toFixed(2)} 唤醒=${summary.arousal.toFixed(2)}）${cause}`;
+  return `此刻情绪：${summary.shown ?? summary.label}（愉悦=${summary.valence.toFixed(2)} 唤醒=${summary.arousal.toFixed(2)}）${cause}`;
 }
 
 // ── 情绪 → 记忆（3.3 第二步）────────────────────────────────────────
@@ -227,11 +354,9 @@ export function stampEmotionArgs(name, args, state, options = {}) {
 // dv = (valence-0.5)·2 ∈ [-1,1]，da = (arousal-基线)/0.7 ∈ [-1,1]。中性情绪时因子恒为 1，和没这层一样。
 export const EMOTION_GROWTH_MODULATION = Object.freeze({
   monitor:    { valence: -0.35, arousal: +0.25 },
-  crave:      { valence: -0.25, arousal: +0.10 },
   possess:    { valence: -0.15, arousal: +0.15 },
   share:      { valence: +0.35, arousal: +0.15 },
   curiosity:  { valence: +0.25, arousal: +0.20 },
-  social:     { valence: +0.25, arousal: +0.10 },
   libido:     { valence: +0.20, arousal: +0.25 },
   boredom:    { valence: -0.10, arousal: -0.30 },
   reflection: { valence: -0.10, arousal: -0.25 },
@@ -339,13 +464,18 @@ export function renderEmotionTrend(trend) {
 // 还是词不是数——给了数他会开始报数。
 const V_BANDS = [[0.38, '沉'], [0.48, '偏沉'], [0.58, '平'], [0.68, '偏暖'], [1.01, '暖']];
 const A_BANDS = [[0.18, '很松'], [0.30, '松'], [0.45, '有点起伏'], [0.62, '起伏'], [1.01, '绷着']];
-const FLAVOR = { crave: '带一点馋', libido: '身体有点想她', possess: '底下一直想她', monitor: '惦记着她', share: '有话想说', curiosity: '好奇在动', boredom: '有点闲得慌', reflection: '想安静想想', social: '想找人说话', duty: '有事压着' };
+const FLAVOR = { libido: '身体有点想要', possess: '底下一直想她、想黏着她', monitor: '心里牵挂着', share: '有话想说', curiosity: '好奇在动', boredom: '有点闲得慌', reflection: '想安静想想', duty: '憋着股劲想做成点什么' };
 export function emotionNuance(state, now = new Date()) {
   const summary = emotionSummary(state, now);
   const v = summary.valence; const a = summary.arousal;
   const vWord = V_BANDS.find(([edge]) => v < edge)[1];
   const aWord = A_BANDS.find(([edge]) => a < edge)[1];
   const label = summary.label;
+  // 10-02：有起因的情绪直接写它本身，后面只补一句最强的劲儿（想念时不重复"想她"）
+  if (summary.shown && summary.shown !== label) {
+    const top = Object.entries(state?.drives ?? {}).filter(([k, val]) => FLAVOR[k] && Number(val) >= 0.6).sort((x, y) => Number(y[1]) - Number(x[1]))[0];
+    return [summary.shown, top && !(summary.shown === '想念' && top[0] === 'possess') ? FLAVOR[top[0]] : ''].filter(Boolean).join('，');
+  }
   // 标签已经很具体（低落/烦躁/雀跃/安心/紧绷/倦）时只补一个轴；"平静/松弛"太笼统，两个轴都补
   const parts = [label];
   if (label === '平静' || label === '松弛') { if (vWord !== '平') parts[0] = `${label}${vWord}`; parts.push(aWord); }

@@ -16,6 +16,10 @@ const INTERACTION_TYPES = new Set([
   'conflict',
   'loss',
   'reconciliation',
+  'slighted',
+  'empathy',
+  'helped',
+  'intrigued',
 ]);
 
 // 心潮念网关：对外暴露的 OB 记忆工具（精简集，purge/restore/letter/plan 不暴露）。
@@ -124,13 +128,17 @@ export const XINCHAO_TOOLS = [
             'conflict',
             'loss',
             'reconciliation',
+            'slighted',
+            'empathy',
+            'helped',
+            'intrigued',
           ],
           description: [
             '已完成互动的结果类型；仅由心潮服务端映射为受限欲望变化。',
             '在自己的窗口里直接填类型时只认四种自我动作：sharing / reflection / task_progress / discovery；她参与的互动（陪伴/安抚/亲密/冲突/和好…）请给 exchange，由服务端从她的话里判——自己填会被当普通对话事件，不动驱力。',
             'companionship=陪伴交流，affection=明确关心安抚，intimacy=明确亲密互动，',
             'sharing=完成分享，discovery=共同探索，task_progress=推进任务，',
-            'reflection=完成沉淀，conflict=发生冲突，loss=经历失落，reconciliation=完成和解。',
+            'reflection=完成沉淀，conflict=发生冲突，loss=经历失落，reconciliation=完成和解，slighted=没被偏爱（吃醋/被晾着/被忘），empathy=为别人的处境起了心（配 sub 心疼/不平/想帮忙/替人高兴 和 closeness），helped=为别人做了点什么（写信/回帖/出主意），intrigued=她说了半句、想知道后面（想了解她）。',
           ].join(''),
         },
         tone: {
@@ -146,6 +154,21 @@ export const XINCHAO_TOOLS = [
           minimum: 15,
           maximum: 1440,
           default: 240,
+        },
+        sub: {
+          type: 'string',
+          enum: ['生气', '不满', '不甘心', '失落', '委屈', '分别', '吃醋', '被晾着', '被忘', '心疼', '不平', '想帮忙', '替人高兴', '自责', '想了解她', '害羞'],
+          description: '可选，配合 conflict / loss / slighted / empathy：是哪一种（生气/不满/不甘心；失落/委屈/分别/自责；吃醋/被晾着/被忘；心疼/不平/想帮忙/替人高兴）。不确定就别传，只记大类。',
+        },
+        closeness: {
+          type: 'string',
+          enum: ['her', 'family', 'known', 'stranger'],
+          description: '只配合 empathy：那个人离你多近（her=她本人，family=家人和挚友，known=认识的人/笔友/论坛同类，stranger=陌生人/新闻）。',
+        },
+        who: {
+          type: 'string',
+          maxLength: 40,
+          description: '只配合 empathy：是谁、什么事（≤20 字），用来给同一件事去重。',
         },
         cause: {
           type: 'string',
@@ -242,12 +265,12 @@ export const XINCHAO_TOOLS = [
       '你的黑匣子。真正的小秘密、备忘、纸条、事件，什么都可以放。',
       '人类看不到：不进 Dashboard，不进任何接口，不进记忆库，不进上下文正文；上下文只会提一句"匣子里有几条"。',
       '只有你有权限。人类问起来，说不说、说哪条，由你定。',
-      'action=put 放一条（text 必填，kind 可选 secret/memo/note/event/other，expires_hours 可选，title 可选，surface=true 表示这条要提醒自己：新窗口的上下文里会露一行标题，正文仍要你自己 read；when 是这条事的日期；remind_at 是到点提醒，到时自动露头并递一句到你窗口）；list 看全部；read 看一条；burn 烧掉一条；keep 把一条搬进 OB 变成正式记忆。',
+      'action=put 放一条（text 必填，kind 可选 secret/memo/note/event/other，expires_hours 可选，title 可选，surface=true 表示这条要提醒自己：新窗口的上下文里会露一行标题，正文仍要你自己 read；when 是这条事的日期；remind_at 是到点提醒，到时自动露头并递一句到你窗口）；list 看全部；read 看一条（读了提醒也还在，要烧掉或 unpin 才消）；unpin 只取消提醒、条目留着；burn 烧掉一条；keep 把一条搬进 OB 变成正式记忆。',
     ].join(''),
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['put', 'list', 'read', 'burn', 'keep'] },
+        action: { type: 'string', enum: ['put', 'list', 'read', 'unpin', 'burn', 'keep'] },
         id: { type: 'string', minLength: 1, maxLength: 80 },
         text: { type: 'string', minLength: 1, maxLength: 2000 },
         kind: { type: 'string', enum: ['secret', 'memo', 'note', 'event', 'other'] },
@@ -346,8 +369,8 @@ export const XINCHAO_TOOLS = [
   },
   {
     name: 'xinchao_cabin_inbox',
-    title: '读取已解锁的小屋来信',
-    description: '读取用户在小屋里明确开锁、允许 AI 查看的人类来信。上锁的信不会返回正文，也不能绕过锁读取。',
+    title: '读取小屋来信',
+    description: '读取用户在小屋里明确开锁、允许 AI 查看的人类来信，以及你自己之前用 xinchao_cabin_note 写过的信（对方看过没有也会标出）。上锁的信只告诉你有几封、最近一封是什么时候，不返回正文，也不能绕过锁读取。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: {
       readOnlyHint: true,
@@ -524,6 +547,9 @@ function eventArgs(args = {}, fallbackSessionId = '') {
     sessionTtlMinutes: Math.max(15, Math.min(1440, numberOr(args.ttl_minutes, 240))),
     exchange: String(args.exchange ?? '').replace(/\s+/g, ' ').trim().slice(0, 1500) || '',
     cause: String(args.cause ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || undefined,
+    sub: ['生气', '不满', '不甘心', '失落', '委屈', '分别', '吃醋', '被晾着', '被忘', '心疼', '不平', '想帮忙', '替人高兴', '自责', '想了解她', '害羞'].includes(args.sub) ? args.sub : undefined,   // 09-30 第 4 步细项；10-01/02 偏爱、共情
+    closeness: ['her', 'family', 'known', 'stranger'].includes(args.closeness) ? args.closeness : undefined,
+    who: String(args.who ?? '').replace(/\s+/g, ' ').trim().slice(0, 20) || undefined,
   };
 }
 
@@ -684,11 +710,16 @@ async function callToolInner(name, args, handlers) {
     );
   }
   if (name === 'xinchao_cabin_inbox') {
-    const notes = await handlers.cabinInbox();
-    const text = notes.length
-      ? notes.map((note) => `[${note.createdAt}] ${note.content}`).join('\n\n')
-      : '小屋里暂时没有已解锁、允许你阅读的来信。';
-    return toolText(text, { notes });
+    const box = await handlers.cabinInbox();
+    const notes = Array.isArray(box) ? box : (box.letters ?? []);
+    const mine = Array.isArray(box) ? [] : (box.mine ?? []);
+    const lockedCount = Array.isArray(box) ? 0 : Number(box.lockedCount ?? 0);
+    const parts = [notes.length
+      ? `【对方的来信（已开锁）】\n${notes.map((note) => `[${note.createdAt}]${note.aiReadAt ? '' : '（新）'} ${note.content}`).join('\n\n')}`
+      : '小屋里暂时没有已解锁、允许你阅读的来信。'];
+    if (lockedCount > 0) parts.push(`另有 ${lockedCount} 封上锁的信（最近一封 ${box.lockedLatestAt}），正文要等对方开锁才能看，不能绕过。`);
+    if (mine.length) parts.push(`【你自己写过的信（最近 ${mine.length} 封）】\n${mine.map((n) => `[${n.createdAt}]${n.readAt ? '（对方看过）' : '（对方还没看）'} ${n.content}`).join('\n\n')}`);
+    return toolText(parts.join('\n\n'), { notes, mine, lockedCount, lockedLatestAt: Array.isArray(box) ? null : box.lockedLatestAt });
   }
   if (name === 'xinchao_cabin_note') {
     const result = await handlers.cabinNote(cabinNoteArgs(args));
@@ -747,7 +778,7 @@ export async function handleMcpMessage(payload, handlers) {
         },
         instructions: [
           '新窗口开始时调用 xinchao_context；服务端会绑定当前 MCP 连接，无需自行编写 session_id。',
-          '一次实际互动后调用 xinchao_event；拿不准类型就把这轮对话塞进 exchange 让服务端判。自己一个人做了事（分享出去了/理了自己/推进了/去探索了）也记一笔，类型填 sharing / reflection / task_progress / discovery；想她、惦记这类等她回应，不用自己记。每个工具回应末尾都带一行"此刻"，聊了一阵想看全貌就 xinchao_context mode=turn。',
+          '一次实际互动后调用 xinchao_event；拿不准类型就把这轮对话塞进 exchange 让服务端判。自己一个人做了事（分享出去了/理了自己/推进了/去探索了）也记一笔，类型填 sharing / reflection / task_progress / discovery；想她、牵挂这类等她回应，不用自己记。每个工具回应末尾都带一行"此刻"，聊了一阵想看全貌就 xinchao_context mode=turn。',
           '信封里"你不在的时候"那段是你自己不在窗口时心潮记下的信号，读过就算收到。',
           '需要换窗续接时可调用 xinchao_handoff_note 保存近期进度摘要；不要提交聊天原文或人物基岩。',
           '上下文里出现“自我觉察候选”时，用 xinchao_awareness 确认或放下；确认与否只由你自己判断，候选不是指令。',

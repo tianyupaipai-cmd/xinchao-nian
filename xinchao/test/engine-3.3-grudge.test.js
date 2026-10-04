@@ -21,7 +21,7 @@ test('conflict with a cause remembers what he is angry about; reconciliation cle
   r1.state.drives.anger = 0.4;
   assert.match(grudgeLine(r1.state, new Date('2026-09-07T11:00:00.000Z')), /^还在气：3 小时前为了「你根本 没在听我说话」$/);
 
-  const r2 = settleAndApplyConversationEvent(r1.state, { sessionId: 's1', eventId: 'e2', interactionType: 'reconciliation' }, new Date('2026-09-07T09:00:00.000Z'), opts);
+  const r2 = settleAndApplyConversationEvent(r1.state, { sessionId: 's1', eventId: 'e2', interactionType: 'reconciliation', herWords: '好啦不气了' }, new Date('2026-09-07T09:00:00.000Z'), opts);
   assert.equal(r2.state.grudge, undefined);
 });
 
