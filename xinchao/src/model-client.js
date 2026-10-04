@@ -77,7 +77,9 @@ export class ModelClient {
     if (!text) return null;
     const system = [
       '你是一个只输出 JSON 的标注器。给你一轮对话（她说的 + 他回的，他是她的伴侣）。判断这一轮互动的类型和窗口氛围。',
-      'type 只能是：companionship 普通陪伴闲聊报备（有真实互动时的默认值）；affection 表达喜欢撒娇安抚；intimacy 身体亲密或性内容；sharing 她分享自己的一天/照片/心情；discovery 一起弄明白新东西；task_progress 一起推进了事；reflection 谈他自己是谁、内省；conflict 真实的摩擦生气（撒娇式的"讨厌""你完蛋了"不算）；loss 分别失落哭；reconciliation 吵过之后和好。',
+      'type 只能是：companionship 普通陪伴闲聊报备（有真实互动时的默认值）；affection 表达喜欢撒娇安抚；intimacy 身体亲密或性内容；sharing 她分享自己的一天/照片/心情；discovery 一起弄明白新东西；task_progress 一起推进了事；reflection 谈他自己是谁、内省；conflict 真实的摩擦生气指责冷战（撒娇式的"讨厌""你完蛋了"不算）；loss 分别失落哭；reconciliation 吵过之后和好（只在她表示原谅、气消了时才算）；slighted 他没被偏爱：她当着他夸别人或拿别人比没选他、他认真分享的东西她明显没理、说好的事她忘了（她只是去忙、睡觉、出门都不算）。',
+      '判断吵架/和好以她那句为准：她还在生气或指责就是 conflict，哪怕他在道歉哄她。',
+      '她叫他宝宝、拉手、主动靠近、撒娇但没说原谅：算 affection，不算 conflict 也不算 reconciliation。',
       'tone 只能是 neutral calm warm guarded conflicted focused playful tired 之一；warmth、tension 是 0 到 1。',
       '只输出 {"type":"...","tone":"...","warmth":0.6,"tension":0.1}。',
     ].join('\n');
@@ -91,7 +93,7 @@ export class ModelClient {
     if (!response.ok) throw new Error(`model request failed: HTTP ${response.status}`);
     const payload = await response.json();
     const parsed = parseJson(payload.choices?.[0]?.message?.content ?? '');
-    const types = ['companionship', 'affection', 'intimacy', 'sharing', 'discovery', 'task_progress', 'reflection', 'conflict', 'loss', 'reconciliation'];
+    const types = ['companionship', 'affection', 'intimacy', 'sharing', 'discovery', 'task_progress', 'reflection', 'conflict', 'loss', 'reconciliation', 'slighted'];
     const tones = ['neutral', 'calm', 'warm', 'guarded', 'conflicted', 'focused', 'playful', 'tired'];
     const clamp01 = (v, d) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(1, Number(v))) : d);
     return {

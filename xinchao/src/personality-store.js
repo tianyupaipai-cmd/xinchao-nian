@@ -23,15 +23,14 @@ export const PERSONALITY_DIMENSIONS = Object.freeze([
 ].map(([key, label]) => Object.freeze({ key, label })));
 
 const CORE_TO_DRIVES = Object.freeze({
-  '爱与依恋': { drives: ['possess', 'crave'], direction: 1 },
+  '爱与依恋': { drives: ['possess'], direction: 1 },
   '表达': { drives: ['share'], direction: 1 },
-  '平静与安全': { drives: ['grieve', 'monitor'], direction: -1 },
+  '平静与安全': { drives: ['grieve', 'monitor', 'favored'], direction: -1 },
   '欲望与动机': { drives: ['libido', 'curiosity'], direction: 1 },
 });
 
 export const NEUTRAL_DRIVE_BIAS = Object.freeze({
   possess: 1,
-  crave: 1,
   share: 1,
   grieve: 1,
   monitor: 1,

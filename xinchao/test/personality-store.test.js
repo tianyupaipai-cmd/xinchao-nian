@@ -27,7 +27,7 @@ test('only the four approved personality groups bias drives and remain capped at
     { label: '恐惧', score: 0 },
   ] });
   assert.equal(bias.possess, 1.1);
-  assert.equal(bias.crave, 1.1);
+  assert.equal(bias.crave, undefined);   // 09-30 馋她并进想她
   assert.equal(bias.share, 0.9);
   assert.equal(bias.grieve, 1.1);
   assert.equal(bias.monitor, 1.1);

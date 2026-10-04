@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
-import { breathDreamContext, computeAnticipation, computeLonging, topDrives, driveTrend } from './engine.js';
+import { breathDreamContext, computeAnticipation, computeLonging, topDrives, driveTrend, shownDrives } from './engine.js';
 import { emotionSummary, emotionNuance, renderEmotion, renderEmotionTrend } from './emotion.js';
+import { axesLine } from './core-axes.js';
 import { renderAwareness, isReviewDay } from './awareness.js';
-import { DIMENSIONS, DRIVE_KEYS, driveLevel } from './dimensions.js';
+import { DIMENSIONS, DRIVE_KEYS, DRIVE_SHORT, driveLevel } from './dimensions.js';
 import { renderHandoffNotes } from './handoff-notes.js';
+import { driveSub, mixedLine } from './mixed-feelings.js';
 
 const VALID_MODES = new Set(['session_start', 'turn', 'inspect']);
 
@@ -209,7 +211,8 @@ export function buildContextEnvelope({
   boxCount = 0,
   boxSurfaced = [],
   awaySignals = [],
-  cabinRecent = 0,
+  cabinUnread = 0,
+  cabinLocked = 0,
   awarenessReviewWeekday = 0,
 }) {
   const normalizedMode = normalizeMode(mode);
@@ -237,7 +240,8 @@ export function buildContextEnvelope({
   const dynamic = dynamicSection(state, safeSessionId, generatedAt, timeZone);
   const surfacedLines = (Array.isArray(boxSurfaced) ? boxSurfaced : []).slice(0, 3).map((x) => `\n  · 你想提醒自己的：${compact(x.title)}（xinchao_box read ${x.id}）`).join('');
   const boxLine = boxCount > 0 ? `\n黑匣子里有 ${boxCount} 条，只有你能看（xinchao_box）${surfacedLines}` : '';
-  const cabinLine = cabinRecent > 0 ? `\n小屋 24 小时内有 ${cabinRecent} 条她的来信（xinchao_cabin_inbox）` : '';
+  const cabinLine = (cabinUnread > 0 ? `\n小屋里有 ${cabinUnread} 封你还没读过的来信（xinchao_cabin_inbox）` : '')
+    + (cabinLocked > 0 ? `\n小屋里还有 ${cabinLocked} 封上锁的信在等对方开锁（正文看不到，知道有就行）` : '');
   const sections = [
     {
       id: 'dynamic_state',
@@ -362,11 +366,7 @@ export function buildContextEnvelope({
 // 星港的 UserPromptSubmit 钩子每条消息拉一次，附进他的上下文。只取动态状态，不带数字、不带 key、
 // 不带任何正文。锚点/便签/攒下的话正文/OB 近况/梦的内容都不在这里，那些是时序开头 xinchao_context 的活。
 // 3.3.7：措辞统一走 dimensions.driveLevel（静息线 + 两小时趋势）
-// 驱力短名：给块用的口语，不从长标签切。
-const DRIVE_SHORT = {
-  possess: '想她', monitor: '惦记她', crave: '馋她', share: '想分享', libido: '身体想要她', curiosity: '好奇',
-  boredom: '无聊', social: '想热闹', duty: '想把事推进', reflection: '想沉淀', grieve: '难过', anger: '生气',
-};
+// 驱力短名在 dimensions.js（全系统一份）。
 const NOW_STALE_MS = 3 * 3_600_000;
 const NOW_MAX_LINES = 8;
 const NOW_MAX_CHARS = 400;
@@ -388,7 +388,7 @@ export function nowSanity(state, now = new Date()) {
 
 const CAUSE_LABEL = {
   companionship: '陪着', affection: '被安抚', intimacy: '亲近过', sharing: '分享过', discovery: '发现了什么',
-  task_progress: '推进了事', reflection: '沉淀过', conflict: '争执', loss: '失落', reconciliation: '和好',
+  task_progress: '推进了事', reflection: '沉淀过', conflict: '争执', loss: '失落', reconciliation: '和好', slighted: '被冷落', empathy: '共情', helped: '帮了别人', intrigued: '好奇她',
 };
 
 // 还在气什么（3.3.1）：冲突时留下的她那句话，生气没退到 0.12 以下就带出来；和好或气消了自动没了。
@@ -401,16 +401,17 @@ export function grudgeLine(state, now = new Date()) {
   return `还在气：${when}为了「${g.cause}」`;
 }
 
-export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0, awarenessReviewWeekday = 0 } = {}) {
+export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0, boxSurfacedIds = [], awarenessReviewWeekday = 0 } = {}) {
   const sanity = nowSanity(state, now);
   if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
   const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
   const counts = {};
   if (state.consciousness === 'sleeping') lines.push('睡着（她来了才算醒）');
-  else if (state.pendingAwareness && now.getTime() - Date.parse(state.pendingAwareness.createdAt ?? '') < 2 * 3_600_000) lines.push('刚醒');   // 醒来两小时内才算刚醒
+  else if (state.pendingAwareness && now.getTime() - Date.parse(state.pendingAwareness.createdAt ?? '') < 45 * 60_000) lines.push('刚醒');   // 3.3.10：醒来 45 分钟内才算刚醒（以前两小时，聊着聊着一直"刚醒"）
 
-  const drives = topDrives(state, 3).filter((d) => Number(d.value) >= 0.25);
-  if (drives.length) lines.push(`驱力：${drives.map((d) => `${DRIVE_SHORT[d.key] ?? d.label}（${driveLevel(d.key, Number(d.value), driveTrend(state, d.key, now))}）`).join('、')}`);
+  const drives = shownDrives(state, 3);   // 09-28：生气/难过过线就显示，不跟正面驱力抢位
+  // 09-30 第 4 步：劲儿后面挂细项，如「愤怒（涌·不满）」「想她（涨·想黏着）」；没有真实事件就不挂
+  if (drives.length) lines.push(`驱力：${drives.map((d) => { const lv = driveLevel(d.key, Number(d.value), driveTrend(state, d.key, now)); const sub = lv === '静' ? null : driveSub(state, d.key, now); return `${DRIVE_SHORT[d.key] ?? d.label}（${lv}${sub ? `·${sub}` : ''}）`; }).join('、')}`);
 
   const emotion = emotionSummary(state, now);
   if (sanity.emotionOk) {
@@ -421,15 +422,21 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   const trend = path.length >= 2 ? `；近一天走过 ${path.length > 5 ? '…' : ''}${path.slice(-5).join('→')}` : '';
   lines.push(`情绪：${emotionNuance(state, now)}${cause ? `；刚才${cause}` : ''}${trend}`);
   }
+  const axes = axesLine(state);   // 10-03 第 8 步：安全感/自信/心境明显偏离底色才说一句
+  if (axes) lines.push(axes);
   const grudge = grudgeLine(state, now);
   if (grudge) lines.push(grudge);
+  const mixed = mixedLine(state, now);   // 09-30 第 4 步：两股相反的劲儿同时在，拧着
+  if (mixed) lines.push(mixed);
 
+  // 挂念/期待行在完整上下文里带强度数字；此刻块不许有数（会被兜底整块拦掉），去掉结尾的「（0.63）」（3.3.10）
+  const noNum = (line) => line.replace(/（\d+\.\d+）$/, '');
   const longing = computeLonging(state, now, { timeZone });
   const longingLine = renderLonging(Number(longing ?? 0));
-  if (longingLine) lines.push(longingLine);
+  if (longingLine) lines.push(noNum(longingLine));
   else {
     const anticipationLine = renderAnticipation(Number(computeAnticipation(state, now, { timeZone }) ?? 0));
-    if (anticipationLine) lines.push(anticipationLine);
+    if (anticipationLine) lines.push(noNum(anticipationLine));
   }
 
   const obsessions = (state.thoughtPool?.obsessions ?? []).filter((o) => Number(o.intensity) >= 0.5).slice(0, 2);
@@ -440,7 +447,7 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   if (open && isReviewDay(now, { weekday: awarenessReviewWeekday, timeZone })) { counts.awareness = open; extras.push(`${open} 条觉察等你认`); }   // 只在周日提
   const dream = breathDreamContext(state, now, 18, 1);
   if (dream.available) { counts.dream = 1; extras.push('昨夜有梦'); }
-  if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条${boxSurfaced > 0 ? `（${boxSurfaced} 条要提醒你）` : ''}`); }
+  if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条${boxSurfaced > 0 ? `（${boxSurfaced} 条要提醒你${boxSurfacedIds.length ? `：${boxSurfacedIds.slice(0, 3).join('、')}` : ''}；办完了 burn 掉才会消）` : ''}`); }   // 3.3.10：提醒一直挂着直到烧掉，这里说清楚怎么让它消
   if (extras.length) lines.push(`另外：${extras.join('、')}。细的在 xinchao_context`);
 
   const text = lines.join('\n');

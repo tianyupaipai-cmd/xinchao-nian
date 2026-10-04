@@ -34,8 +34,8 @@ test('3.3.9 闪念不挂在已经涌的维上，改挂下一维；都在涌就�
   state.drives.possess = 0.70;      // 静息线 0.82，没涌
   assert.equal(surfacedDriveKey(['内心', '恋爱'], state), 'possess');
   state.drives.possess = 0.95;
-  assert.equal(surfacedDriveKey(['内心', '恋爱'], state), 'crave');         // 想她也涌了 → 顺延到馋她
-  for (const k of ['reflection', 'possess', 'crave', 'monitor', 'libido', 'grieve', 'share']) state.drives[k] = 0.95;
+  assert.equal(surfacedDriveKey(['内心', '恋爱'], state), 'grieve');        // 想她也涌了 → 顺延到下一维（09-30 馋她并进想她后，下一维是难过）
+  for (const k of ['reflection', 'possess', 'monitor', 'libido', 'grieve', 'share']) state.drives[k] = 0.95;
   assert.equal(surfacedDriveKey(['内心', '恋爱'], state), 'reflection');    // 全在涌 → 还挂最高的
   assert.equal(surfacedDriveKey(['内心', '恋爱']), 'reflection');           // 没有状态：按亲和度
 });

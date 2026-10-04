@@ -67,8 +67,20 @@ export class BlackBox {
   async read(id, now = new Date()) {
     const items = await this.list(now);
     const item = items.find((x) => x.id === String(id ?? '').trim());
+    // 到点提醒读了也一直露头，直到烧掉（或 unpin）——这是有意的，提醒要一直在眼前（她 09-26 定）
     if (item) await this.store.update((box) => { this._audit(box, 'read', item.id, now); return box; });
     return item ?? null;
+  }
+
+  // 3.3.10：只清"要提醒自己"的标记，条目留着
+  async unpin(id, now = new Date()) {
+    let found = false;
+    await this.store.update((box) => {
+      const item = box.items.find((x) => x.id === String(id ?? '').trim());
+      if (item) { found = true; if (item.surface) { item.surface = false; this._audit(box, 'unpin', item.id, now); } }
+      return box;
+    });
+    return found;
   }
 
   async burn(id, now = new Date()) {

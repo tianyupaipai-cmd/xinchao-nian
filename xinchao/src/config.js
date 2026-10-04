@@ -183,7 +183,7 @@ export function loadConfig() {
       enabled: bool('ANTICIPATION_ENABLED', true),
       arrivalGapMinutes: number('ANTICIPATION_ARRIVAL_GAP_MINUTES', 90, 15, 720)
     },
-    // 挂念：作息预期的另一半。她过了常来的点还没来 → 轻推 monitor(惦记)，硬顶在 3A 天花板内、
+    // 挂念：作息预期的另一半。她过了常来的点还没来 → 轻推 monitor(牵挂)，硬顶在 3A 天花板内、
     // 不自激；只在她活跃时段念，静默时段(在睡)不念。失落内化，绝不责备。
     longing: {
       enabled: bool('LONGING_ENABLED', true),
