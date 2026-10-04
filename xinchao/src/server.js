@@ -903,7 +903,7 @@ async function createContextEnvelope({
 }
 
 // 没填类型但给了 exchange（她的一句 + 他的一段）→ 服务端替接收端判互动类型和氛围。
-// MCP（官方客户端版）和 REST /v1/conversation-event（自建运行时）共用；8 分钟内不重复判，和 PaiHome 钩子的节流一致。
+// MCP（官方客户端版）和 REST /v1/conversation-event（自建运行时）共用；8 分钟内不重复判，和客户端钩子的节流一致。
 // exchange 正文只走这一跳：判完即删，不进状态、不进审计。
 // 4.0：互动判断的把关规则（词表、远近名单都是参考值）。每家可以在 configs/interaction-rules.json 覆盖，一分钟重读一次
 const RULES_PATH = process.env.INTERACTION_RULES_PATH ?? '/app/configs/interaction-rules.json';

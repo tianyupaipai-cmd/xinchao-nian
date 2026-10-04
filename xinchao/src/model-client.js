@@ -73,7 +73,7 @@ export class ModelClient {
     };
   }
 
-  // 官方客户端版：AI 把这轮对话塞进 exchange，服务端判互动类型与氛围（对应 PaiHome 的 Stop 钩子标注）。
+  // 官方客户端版：AI 把这轮对话塞进 exchange，服务端判互动类型与氛围（对应自建客户端的 Stop 钩子标注）。
   async classifyInteraction(exchange) {
     if (!this.config.enabled || !this.config.apiKey) return null;
     const text = String(exchange ?? '').trim().slice(0, 1500);
