@@ -78,6 +78,8 @@ services:
       # 用镜像内 /app/state 的 node 所有权初始化，一键部署不需手动 chown。
       - xinchao-state:/app/state
       - ombre-buckets:/ombre-buckets:ro
+      # 4.0：把配置目录挂进来，改 xinchao/configs/ 里的 interaction-rules.json、attention-rules.json 一分钟内生效，不用重建
+      - ./xinchao/configs:/app/configs:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
