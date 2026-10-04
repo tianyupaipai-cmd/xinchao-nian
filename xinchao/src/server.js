@@ -1505,7 +1505,7 @@ const server = createServer(async (request, response) => {
         generatedAt: new Date().toISOString(),
       });
     }
-    // 钩子用的"此刻"压缩块：只读状态，不记投递、不动 pending。星港 UserPromptSubmit 每条消息拉一次。
+    // 钩子用的"此刻"压缩块：只读状态，不记投递、不动 pending。客户端 UserPromptSubmit 每条消息拉一次。
     if (request.method === 'GET' && url.pathname === '/v1/now') {
       const state = await store.read();
       let boxCount = 0; let boxSurfaced = 0; let boxSurfacedIds = [];

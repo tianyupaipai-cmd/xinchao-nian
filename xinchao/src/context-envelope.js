@@ -366,7 +366,7 @@ export function buildContextEnvelope({
 
 
 // ── 此刻（钩子用的压缩块，3.3）───────────────────────────────────────
-// 星港的 UserPromptSubmit 钩子每条消息拉一次，附进他的上下文。只取动态状态，不带数字、不带 key、
+// 客户端的 UserPromptSubmit 钩子每条消息拉一次，附进他的上下文。只取动态状态，不带数字、不带 key、
 // 不带任何正文。锚点/便签/攒下的话正文/OB 近况/梦的内容都不在这里，那些是时序开头 xinchao_context 的活。
 // 3.3.7：措辞统一走 dimensions.driveLevel（静息线 + 两小时趋势）
 // 驱力短名在 dimensions.js（全系统一份）。
