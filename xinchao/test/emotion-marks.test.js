@@ -32,3 +32,20 @@ test('mark-only events leave a mark (optionally back-dated) without moving any d
   assert.equal(s.emotionMarks[0].at, at(-60).toISOString());
   for (const k of Object.keys(before)) assert.ok(Math.abs(s.drives[k] - before[k]) < 0.02, k);
 });
+
+test('the same feeling coming again within 2 hours merges into one mark with a count', async () => {
+  const { recordMark, recentMarks } = await import('../src/emotion-marks.js');
+  const s = {};
+  recordMark(s, '心动', 3, { type: 'intimacy', note: '第一句' }, at(0));
+  recordMark(s, '心动', 2, { type: 'affection', note: '第二句' }, at(50));
+  recordMark(s, '害羞', 2, {}, at(60));
+  recordMark(s, '心动', 2, { note: '第三句' }, at(160));   // 离上一次心动 110 分钟：还并
+  recordMark(s, '心动', 2, {}, at(300));                   // 离上一次心动 140 分钟：新记一个
+  assert.deepEqual(s.emotionMarks.map((m) => [m.word, m.n ?? 1]), [['心动', 3], ['害羞', 1], ['心动', 1]]);
+  assert.equal(s.emotionMarks[0].weight, 3);
+  assert.equal(s.emotionMarks[0].note, '第三句');
+  assert.equal(s.emotionMarks[0].lastAt, at(160).toISOString());
+  const pub = recentMarks(s, at(310));
+  assert.equal(pub[0].n, 3);
+  assert.equal(pub[1].n, undefined);
+});
