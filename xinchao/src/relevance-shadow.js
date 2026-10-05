@@ -70,8 +70,9 @@ export function createRelevanceShadow({ apiKey, enabled, statePath, nowText, log
       if (!res.ok) throw new Error(`HTTP ${res.status} ${JSON.stringify(j).slice(0, 120)}`);
       row = {
         at: new Date().toISOString(), source, ms: Date.now() - t0, model: j.model ?? null,
-        recent: recent ? recent.slice(0, 40) : null,
-        items: items.map((x, i) => ({ id: x.id, p: j.answers?.[`r${i + 1}`]?.noul ?? null, head: x.body.slice(0, 40) })),
+        // 日志不存原句：只记有没有参照句、每条记忆的编号和分数
+        hasRecent: Boolean(recent),
+        items: items.map((x, i) => ({ id: x.id, p: j.answers?.[`r${i + 1}`]?.noul ?? null })),
         tokens: { in: j.usage?.input_tokens ?? null, out: j.usage?.output_tokens ?? null },
       };
     } catch (error) {
