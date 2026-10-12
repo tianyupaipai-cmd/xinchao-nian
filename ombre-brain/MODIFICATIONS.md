@@ -11,7 +11,6 @@ P0luz/Ombre-Brain（原项目, MIT, © P0lar1zzZ）
 - 原项目：https://github.com/P0luz/Ombre-Brain  （MIT，见 `LICENSE.P0luz-MIT`）
 - 二改仓库：CyberSealNull（fork of P0luz，见 `LICENSE.CyberSealNull` / `NOTICE.CyberSealNull.md`；
   其新增内容仅限个人 / 学习 / 非商业，商用需该 fork 维护者书面许可）
-- 本版本基线：`VERSION` = 2.6.5
 
 ## 心潮念在此基础上的改动
 

@@ -10,7 +10,6 @@
 
 心潮念的记忆库层。**从源码构建**（`compose.yaml` 里 `build: ./ombre-brain`），不依赖外部镜像。
 
-- 基线版本：`VERSION` = 2.6.5
 - 血统与许可证：P0luz（原, MIT）→ CyberSealNull（二改, 非商业）→ 心潮念（breath-meta 等）。
   详见 [MODIFICATIONS.md](MODIFICATIONS.md)、`LICENSE.P0luz-MIT`、`LICENSE.CyberSealNull`、
   `NOTICE.CyberSealNull.md` 与仓库根 `../NOTICE`。

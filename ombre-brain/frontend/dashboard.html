@@ -2237,9 +2237,7 @@
       <h3>版本 & 更新 <span class="sec-en">Version &amp; Update</span></h3>
       <div class="ver-status-row">
         <span style="font-size:13px;">当前版本：<b id="ver-local-disp">…</b></span>
-        <button class="btn-secondary" onclick="checkGitHubVersion()" id="btn-check-ver" style="height:30px;padding:0 14px;font-size:12px;display:inline-flex;align-items:center;gap:5px;">
-          <i data-lucide="refresh-cw"></i> 检查 GitHub 更新
-        </button>
+        <span style="font-size:12px;color:var(--text-dim);">跟着心潮·念一起更新，不单独升级；要更新就拉心潮·念仓库的新版本重新构建。</span>
         <span id="ver-checking" style="display:none;font-size:12px;color:var(--text-dim);">检查中…</span>
         <span class="ver-badge ver-badge-ok"  id="ver-badge-ok"  style="display:none;">✓ 已是最新</span>
         <span class="ver-badge ver-badge-new" id="ver-badge-new" style="display:none;">⬆ 有新版本</span>
@@ -6632,12 +6630,12 @@ async function loadVersionBadge() {
     const r = await fetch(BASE + '/api/version');
     const d = await r.json();
     _obLocalVersion = d.version || null;
+    // 心潮·念内置的 OB 不单独标版本号，跟着心潮·念一起发布（老有人看到这里的号以为是旧版）
     const el = document.getElementById('version-badge');
-    if (el && d.version) el.textContent = 'v' + d.version;
-    document.title = 'Ombre Brain · v' + (d.version || '');
-    // 同步填入版本面板
+    if (el) el.textContent = '心潮·念内置';
+    document.title = 'Ombre Brain · 心潮·念';
     const vl = document.getElementById('ver-local-disp');
-    if (vl && d.version) vl.textContent = 'v' + d.version;
+    if (vl) vl.textContent = '心潮·念内置版';
   } catch(_) {}
 }
 loadVersionBadge();
@@ -6687,7 +6685,7 @@ loadVersionBadge();
     var deployEl = document.getElementById('ver-deploy-info');
     if (deployEl) {
       deployEl.textContent = [
-        '当前版本  : v' + (info.version || _obLocalVersion || '?'),
+        '当前版本  : 心潮·念内置版',
         '部署方式  : ' + (info.is_docker ? 'Docker 容器' : '裸机 / git'),
         '服务端口  : ' + (info.port || location.port || '8000'),
         '数据目录  : ' + (info.data_dir || '（未知）'),
@@ -6806,7 +6804,12 @@ loadVersionBadge();
     }
   };
 
+  // 内置版不再和上游 P0luz/Ombre-Brain 比版本号（两边不是同一条版本线，比出来的「有新版本」会误导人）
   window.checkGitHubVersion = async function() {
+    var badgeOk = document.getElementById('ver-badge-ok');
+    if (badgeOk) { badgeOk.textContent = '跟着心潮·念一起更新'; badgeOk.style.display = ''; }
+  };
+  window._checkUpstreamVersion = async function() {
     var btnCheck  = document.getElementById('btn-check-ver');
     var checking  = document.getElementById('ver-checking');
     var badgeOk   = document.getElementById('ver-badge-ok');
