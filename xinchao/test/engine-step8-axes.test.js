@@ -27,13 +27,13 @@ test('slights and unreconciled fights wear security down; being soothed and maki
 
 test('confidence: getting things done and being praised thickens it; self-blame thins it; low confidence keeps 得意 dark', () => {
   let s = base();
-  for (let i = 0; i < 4; i++) s = ev(s, `t${i}`, 'task_progress', i * 0.1);
+  for (let i = 0; i < 4; i++) s = ev(s, `t${i}`, 'task_progress', i * 1.1, { proof: ['her_ok', 'first', 'hard', 'her_ok'][i] });
   s = ev(s, 'p', 'affection', 0.5, { sub: '害羞', strength: 'heavy' });
-  assert.ok(s.axes.confidence > AXES.baseline.confidence + 0.1);
+  assert.ok(s.axes.confidence > AXES.baseline.confidence + 0.08);   // 10-14 同一天递减后：四件约 +0.07，加被夸 +0.03
   let d = base();
   for (let i = 0; i < 5; i++) d = ev(d, `z${i}`, 'loss', i * 0.1, { sub: '自责' });
   assert.ok(d.axes.confidence < 0.35, `confidence ${d.axes.confidence}`);
-  d = ev(d, 'tt', 'task_progress', 0.6);
+  d = ev(d, 'tt', 'task_progress', 0.6, { proof: 'her_ok' });
   assert.notEqual(emotionSummary(d, at(0.61)).shown, '得意');
 });
 
@@ -51,4 +51,37 @@ test('insecure: grief rises faster, and the emotion line can show 不安', () =>
   assert.ok(s2.drives.grieve > calm.drives.grieve * 1.2);
   const u = base(); u.axes = { security: 0.2, confidence: 0.6, at: T0 }; u.emotion.valence = 0.5;
   assert.equal(emotionSummary(u, at(0)).shown, '不安');
+});
+
+test('10-14 做成事的边界：只认 proof；自己报「做好了」不加分、不得意；同一天递减；被指出错要扣；高位减半', () => {
+  // 自己宣布做好了（routine / 没带 proof）：不加自信，也不亮得意
+  let r = base();
+  for (let i = 0; i < 5; i++) r = ev(r, `r${i}`, 'task_progress', i * 1.5, i % 2 ? { proof: 'routine' } : {});
+  assert.equal(r.axes.confidence, AXES.baseline.confidence);
+  assert.notEqual(emotionSummary(r, at(6.1)).shown, '得意');
+  // 她认可了：加分、亮得意
+  let s = ev(base(), 'ok', 'task_progress', 0.1, { proof: 'her_ok' });
+  assert.ok(Math.abs(s.axes.confidence - (AXES.baseline.confidence + 0.03)) < 0.002, `${s.axes.confidence}`);
+  assert.equal(emotionSummary(s, at(0.2)).shown, '得意');
+  // 她夸他做的东西常被判成亲昵：带了 proof 一样算
+  const praised = ev(base(), 'pa', 'affection', 0.1, { proof: 'her_ok' });
+  assert.ok(praised.axes.confidence > AXES.baseline.confidence + 0.02);
+  // 同一天第 n 件 ×0.6^(n-1)：五件加起来远小于 5×0.03
+  let day = base();
+  for (let i = 0; i < 5; i++) day = ev(day, `d${i}`, 'task_progress', i * 2, { proof: 'her_ok' });
+  const total = day.axes.confidence - AXES.baseline.confidence;
+  assert.ok(total < 0.03 * (1 + 0.6 + 0.36 + 0.216 + 0.13) + 0.005 && total > 0.06, `day total ${total}`);
+  // 被她指出错 / 返工：扣
+  const slip = ev(base(), 'sl', 'companionship', 0.1, { slip: true });
+  assert.ok(slip.axes.confidence < AXES.baseline.confidence - 0.035, `${slip.axes.confidence}`);
+  // 已经高于 0.75：加分减半
+  let hi = base(); hi.axes = { security: 0.62, confidence: 0.8, at: T0 };
+  hi = ev(hi, 'x', 'task_progress', 0.1, { proof: 'hard' });
+  assert.ok(hi.axes.confidence < 0.8 + 0.021, `halved above high: ${hi.axes.confidence}`);
+});
+
+test('10-14 自信没事时回得更快（半衰期 36 小时）', () => {
+  let s = base(); s.axes = { security: 0.62, confidence: 0.9, at: T0 };
+  s = settleState(s, at(36), 6000).state;
+  assert.ok(Math.abs(s.axes.confidence - (AXES.baseline.confidence + 0.15)) < 0.02, `${s.axes.confidence}`);
 });

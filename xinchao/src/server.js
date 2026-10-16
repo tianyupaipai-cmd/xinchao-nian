@@ -33,6 +33,7 @@ import { boardEnabled, postBoardMessage, readBoardMessages } from './board-clien
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
 import { PersonalityStore, computePersonalityStats } from './personality-store.js';
+import { DrivePromptStore, loadDrivePrompts, pickDrivePrompt } from './drive-prompts.js';
 
 // 情绪 → 记忆：只在开关打开时把此刻情绪坐标交给 OB 做共振排序。
 function emotionForOmbre(state) {
@@ -53,6 +54,7 @@ const store = new StateStore(config.statePath, () => newState());
 const model = new ModelClient(config.model);
 const ombre = new OmbreClient(config.ombre);
 const blackBox = new BlackBox(config.box.statePath);
+const drivePromptStore = new DrivePromptStore(config.bridge.drivePromptsStatePath);
 const bark = new BarkClient(config.bark);
 const journal = new TransitionJournal(config.journalPath);
 const oauth = new OAuthProvider(config.oauth, (event, fields = {}) => log(event, fields));
@@ -259,6 +261,20 @@ async function runCycle() {
         }, (latest) => detectSelfSignals(latest, now, { timeZone: config.settle.timeZone, dawnFreezeStart: config.settle.dawnFreezeStart, dawnFreezeEnd: config.settle.dawnFreezeEnd, awarenessReviewWeekday: config.awareness.reviewWeekday, longing: { timeZone: config.settle.timeZone, ...config.longing } }).state);
         if (preview.signals.length) log('self_signals', { kinds: preview.signals.map((s) => `${s.kind}:${s.subject}`) });
       }
+      // 驱力提示（10-15）：不靠窗口里的保活闹钟，心潮自己按节奏递。先入队再记，入队失败不记（下轮再试）
+      try {
+        const prompts = await loadDrivePrompts(config.bridge.drivePromptsPath);
+        if (prompts) {
+          const before = await drivePromptStore.read();
+          const pick = pickDrivePrompt(state, before, prompts, now, { timeZone: config.settle.timeZone });
+          if (pick.text) {
+            await bridgeQueue.enqueue({ eventId: `drive-prompt-${pick.drive}-${Math.floor(now.getTime() / 60_000)}`, reason: 'self_signal', message: `${pick.text}\n${renderNowLine(state, now)}`, ttlHours: 1 }, now);
+            await publishReadyBridgeDeliveries();
+            log('drive_prompt', { drive: pick.drive, count: pick.record.count });
+          }
+          if (JSON.stringify(pick.record) !== JSON.stringify(before)) await drivePromptStore.write(pick.record);
+        }
+      } catch (error) { log('drive_prompt_failed', { message: error.message }); }
     }
     let dreamCreated = false;
     let barkSent = false;

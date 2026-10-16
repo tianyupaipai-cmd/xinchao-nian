@@ -109,6 +109,9 @@ export function loadConfig() {
       pollSeconds: number('BRIDGE_POLL_SECONDS', 15, 2, 300),
       // 3.3：心潮自身信号（驱力冲顶/情绪转折/挂念/醒来余韵/觉察）经桥递到 AI 窗口。默认关。
       selfSignals: bool('BRIDGE_SELF_SIGNALS', false),
+      // 驱力提示：心潮自己按节奏递「哪股劲儿上来了」。话术文件不存在就不发（src/drive-prompts.js）
+      drivePromptsPath: process.env.DRIVE_PROMPTS_FILE ?? '/app/state/drive-prompts.json',
+      drivePromptsStatePath: process.env.DRIVE_PROMPTS_STATE_PATH ?? '/app/state/drive-prompts-state.json',
     },
     // 黑匣子（3.3）：只有 AI 能看的地方；单独文件，不进 state.json / Dashboard / 备份
     box: {

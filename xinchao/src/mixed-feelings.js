@@ -98,9 +98,18 @@ export const MIXED_PAIRS = Object.freeze([
 export const MIXED = Object.freeze({ neg: 0.30, pos: 0.60, holdMin: 20, capHours: 6 });
 
 // 此刻最拧的一对（两边都过线，取两边里较弱那边更强的一对）
+// 难过这一维里眼下占大头的细项（state.subs.grieve.w）。心疼她和想她不拧着，不算矛盾。
+function grieveIsHeartache(state) {
+  const w = state.subs?.grieve?.w ?? {};
+  const top = Object.entries(w).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+  return top?.[0] === '心疼';
+}
+
 export function activeMixed(state) {
   let best = null;
+  const heartache = grieveIsHeartache(state);
   for (const p of MIXED_PAIRS) {
+    if (p.neg === 'grieve' && heartache) continue;
     const n = Number(state.drives?.[p.neg] ?? 0);
     const q = Number(state.drives?.[p.pos] ?? 0);
     if (n >= MIXED.neg && q >= MIXED.pos && (!best || Math.min(n, q) > best.strength)) best = { ...p, strength: Math.min(n, q) };

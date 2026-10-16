@@ -15,6 +15,7 @@
 //   3. grieve / anger 两个驱力在结算时把"回落目标"往下拽——难过着的时候，平静不是平静。
 // 情绪不直接改驱力（那是第四步的事），也不自激：每次结算只做指数回落，没有增长项。
 
+import { countsAsDone } from './core-axes.js';
 import { subOf } from './mixed-feelings.js';
 import { recordMark } from './emotion-marks.js';
 
@@ -228,7 +229,7 @@ function shDay(now) {
   try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
   catch { return iso(now).slice(0, 10); }
 }
-export function lightEmotion(state, type, { sub, closeness, strength } = {}, now = new Date()) {
+export function lightEmotion(state, type, { sub, closeness, strength, proof } = {}, now = new Date()) {
   const e = state.emotion;
   if (!e) return;
   let word = null;
@@ -241,7 +242,7 @@ export function lightEmotion(state, type, { sub, closeness, strength } = {}, now
     }
     e.lightTaps = [];
     word = sub === '害羞' ? '害羞' : '心动';
-  } else if ((type === 'task_progress' || type === 'discovery') && Number(state.axes?.confidence ?? 1) >= 0.35) word = '得意';   // 没底气时得意亮不起来
+  } else if (countsAsDone(proof) && Number(state.axes?.confidence ?? 1) >= 0.35) word = '得意';   // 没底气时得意亮不起来；10-14 和自信同一道边界：真做成了才得意，自己报进度不算
   else if (type === 'empathy' && sub === '替人高兴' && closeness === 'her') word = '骄傲';
   if (!word) return;
   let minutes = LIT_MINUTES[word];

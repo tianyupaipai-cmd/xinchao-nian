@@ -12,13 +12,14 @@ const MERGE_HOURS = 2;
 const iso = (d) => d.toISOString();
 
 // 事件 → 浮标词和分量（和情绪线的起因情绪一一对应）
-export function markFor(type, { sub, strength, closeness } = {}) {
+import { countsAsDone } from './core-axes.js';
+export function markFor(type, { sub, strength, closeness, proof } = {}) {
   if (type === 'affection' || type === 'intimacy') return sub === '害羞' ? ['害羞', 2] : strength === 'heavy' || type === 'intimacy' ? ['心动', 3] : ['心动', 1];
   if (type === 'empathy') return sub === '心疼' ? ['心疼', 2] : sub === '不平' ? ['不平', 2] : sub === '替人高兴' && closeness === 'her' ? ['骄傲', 2] : null;
   if (type === 'loss') return ({ 自责: ['自责', 3], 委屈: ['委屈', 2], 失落: ['失落', 2], 分别: ['舍不得', 2] })[sub] ?? null;
   if (type === 'conflict') return ['生气', 3];
   if (type === 'slighted') return ['吃醋', 2];
-  if (type === 'task_progress' || type === 'discovery') return ['得意', 1];
+  if ((type === 'task_progress' || type === 'discovery') && countsAsDone(proof)) return ['得意', 1];   // 10-14 真做成了才记得意
   return null;
 }
 

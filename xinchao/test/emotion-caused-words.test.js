@@ -42,7 +42,8 @@ test('想念 instead of 低落 when 想她 is high and mood sinks; 得意 after 
   const s = base(); s.drives.possess = 0.7; s.emotion.valence = 0.36; s.emotion.arousal = 0.25;
   assert.equal(emotionSummary(s, at(0)).label, '低落');
   assert.equal(shown(s, 0), '想念');
-  assert.equal(shown(ev(base(), 't', 'task_progress', 1), 2), '得意');
+  assert.equal(shown(ev(base(), 't', 'task_progress', 1, { proof: 'first' }), 2), '得意');
+  assert.notEqual(shown(ev(base(), 't2', 'task_progress', 1), 2), '得意');   // 10-14 自己报进度不得意
 });
 
 test('10-03: light affection needs 3 within 30 min; the n-th 心动 of the day is shorter (×0.6, ≥15 min)', () => {

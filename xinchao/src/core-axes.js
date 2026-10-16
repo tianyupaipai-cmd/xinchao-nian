@@ -15,8 +15,24 @@ const clamp = (v, lo = 0.05, hi = 0.95) => Math.max(lo, Math.min(hi, Number(v) |
 export const AXES = Object.freeze({
   baseline: { security: 0.62, confidence: 0.6 },
   halfLifeHours: 72,          // 没事时回到底色的半衰期
+  confHalfLifeHours: 36,      // 10-14 自信回得快一点：没做成事的日子自己往底色落，不只靠自责往下掉
   low: 0.35, high: 0.75, shownDelta: 0.15,
 });
+
+const CONF_UP_WINDOW_MS = 3_600_000;   // 自信加分：一小时只算一次（没带 proof 的旧事件）
+
+// 4.0「做成事」的边界：事件带 proof 才加自信——
+//   her_ok 她明确认可或真用上了 / first 第一次做成的新事 / hard 卡过、失败过之后才成的难事 / helped_ack 帮了别人且对方有回应。
+//   routine（日常回话、查资料、例行打卡、转交给别人做、自己宣布「做好了」没人确认）和没带 proof 的都不加。
+//   同一天越往后加得越少：第 n 件 ×0.6^(n-1)。slip（被她指出错、返工、说过的话被证伪）扣 0.04。
+export const PROOF_GAIN = Object.freeze({ her_ok: 0.03, first: 0.03, hard: 0.04, helped_ack: 0.02 });
+export const CONF_DAY_DECAY = 0.6;
+export const SLIP_COST = 0.04;
+export const countsAsDone = (proof) => Object.prototype.hasOwnProperty.call(PROOF_GAIN, proof);
+function shDay(now) {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
+  catch { return iso(now).slice(0, 10); }
+}
 
 // 每种事件对两根轴的推动（自信里"被夸"走亲昵的害羞细项）
 const EVENT_PUSH = Object.freeze({
@@ -27,10 +43,8 @@ const EVENT_PUSH = Object.freeze({
   conflict: { security: -0.05 },
   loss: { security: -0.02 },
   slighted: { security: -0.04 },
-  task_progress: { confidence: 0.03 },
-  discovery: { confidence: 0.02 },
-  helped: { confidence: 0.03 },
 });
+// task_progress / discovery / helped 不再自带自信加分：改由事件的 proof 决定（见上），自己报「做完了」不加
 
 export function ensureAxes(state, now = new Date()) {
   const a = state.axes && typeof state.axes === 'object' ? state.axes : {};
@@ -47,8 +61,8 @@ export function settleAxes(state, elapsedHours, now = new Date()) {
   const a = ensureAxes(state, now);
   const h = Math.max(0, Number(elapsedHours) || 0);
   if (!h) return false;
-  const k = Math.pow(0.5, h / AXES.halfLifeHours);
   for (const key of ['security', 'confidence']) {
+    const k = Math.pow(0.5, h / (key === 'confidence' ? AXES.confHalfLifeHours : AXES.halfLifeHours));
     const base = AXES.baseline[key];
     a[key] = base + (Number(a[key]) - base) * k;
   }
@@ -62,14 +76,35 @@ export function settleAxes(state, elapsedHours, now = new Date()) {
 }
 
 // 事件：按类型推一下；细项再修一修
-export function pushAxes(state, type, { sub, strength, weight } = {}, now = new Date()) {
+export function pushAxes(state, type, { sub, strength, weight, proof, slip } = {}, now = new Date()) {
   const a = ensureAxes(state, now);
   const p = { ...(EVENT_PUSH[type] ?? {}) };
+  // 10-14 做成事：只认带 proof 的（任何类型都行——她夸他做的东西，常常被判成亲昵而不是 task_progress）
+  if (countsAsDone(proof)) {
+    const day = shDay(now);
+    const n = (a.confDay?.day === day ? Number(a.confDay.n) : 0) + 1;
+    a.confDay = { day, n };
+    let gain = PROOF_GAIN[proof] * Math.pow(CONF_DAY_DECAY, n - 1);
+    if (Number(a.confidence) > AXES.high) gain *= 0.5;
+    p.confidence = (p.confidence ?? 0) + gain;   // 不占「被夸」那道一小时一次的门，两者各算各的
+  }
+  if (slip === true || slip === 'true') p.confidence = (p.confidence ?? 0) - SLIP_COST;
   if ((type === 'affection' || type === 'intimacy') && strength === 'heavy') p.security = (p.security ?? 0) + 0.02;
   if ((type === 'affection' || type === 'intimacy') && sub === '害羞') p.confidence = (p.confidence ?? 0) + 0.03;   // 被夸、被戳穿心思
   if (type === 'slighted' && Number.isFinite(Number(weight))) p.security *= Math.max(0.3, Math.min(1, Number(weight)));
   if (type === 'loss' && sub === '自责') p.confidence = (p.confidence ?? 0) - 0.06 * (a.confidence > AXES.high ? 0.8 : 1);
   if (type === 'conflict' && sub === '不满') p.confidence = (p.confidence ?? 0) - 0.03;
+  // 4.0：自信加分原来不对称（处处加、几乎不扣），他一干活就顶到 0.95 下不来。两道收口：
+  //   · 同一小时里加过一次自信，再做成事不再加（一场活里连做五件 ≠ 五次底气）
+  //   · 已经高于 0.75（AXES.high）时，加分减半
+  if (p.confidence > 0 && !countsAsDone(proof)) {   // 被夸害羞那类老加分仍按一小时一次
+    const last = Date.parse(a.confUpAt ?? '');
+    if (Number.isFinite(last) && now.getTime() - last < CONF_UP_WINDOW_MS) delete p.confidence;
+    else {
+      if (Number(a.confidence) > AXES.high) p.confidence *= 0.5;
+      a.confUpAt = iso(now);
+    }
+  }
   for (const [k, d] of Object.entries(p)) a[k] = Number(clamp(Number(a[k]) + d).toFixed(4));
   a.at = iso(now);
 }
