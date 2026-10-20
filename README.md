@@ -12,6 +12,8 @@
 >
 > **从 3.3 升级** → [4.0 升级说明](docs/4.0/升级说明.md)（先备份 `state.json`）
 
+> **4.1.1（2026-10-20）**：修一起打包的 OB 没有 `breath_advanced` 时，白天浮现 / 自主念头把报错当记忆原文的问题，自动退回 `breath`。详见 [CHANGELOG](xinchao/CHANGELOG.md)。
+
 ## 4.1 更新重点（2026-10-16）
 
 - **心潮自己递驱力提示**：不再靠窗口里的保活闹钟，心潮按节奏自己经桥递「哪股劲儿上来了」；话术每家自己写（`configs/drive-prompts.example.json`）。

@@ -55,6 +55,28 @@ export class OmbreClient {
     return this.initializePromise;
   }
 
+  // 4.1.1：读记忆用这个。OB 回 isError（比如老版本没有某个工具：「Unknown tool: breath_advanced」）或 JSON-RPC error 时
+  // 一律当失败抛出，绝不把报错那句话当成记忆原文往下传（4.1.0 把它当浮现原文放进了念头池）。
+  async read(name, args = {}, timeoutMs = 15000) {
+    const result = await this.call(name, args, timeoutMs);
+    const inner = result?.result ?? result;
+    if (result?.error || inner?.isError) throw new OmbreToolError(name, result?.error?.message || extractText(result) || 'isError');
+    return result;
+  }
+
+  // 4.1.1：日期过滤、带 ID 的浮现道只在新版 OB 的 breath_advanced 上。连的是没有它的 OB（比如一起打包的内置版）时，
+  // 记一次告警、以后直接走老的 breath（不传 query = 按权重浮现）；没有对应老接口的（按日期取远期）就这一项不给原料。
+  async breathAdvanced(args, fallback = null) {
+    if (!this.noAdvanced) {
+      try { return await this.read('breath_advanced', args); } catch (error) {
+        if (!(error instanceof OmbreToolError && error.unknownTool)) throw error;
+        this.noAdvanced = true;
+        console.warn(JSON.stringify({ at: new Date().toISOString(), event: 'ombre_breath_advanced_missing', note: '这个 OB 没有 breath_advanced，浮现改走 breath（没有日期窗口）；升级到带 breath_advanced 的 OB 可恢复' }));
+      }
+    }
+    return fallback ? this.read('breath', fallback) : null;
+  }
+
   async call(name, args = {}, timeoutMs = 15000) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await this.initialize();
@@ -92,7 +114,7 @@ export class OmbreClient {
   }
 
   async recentMaterialWithRefs(drives = [], emotion = null) {
-    const result = await this.call('breath', {
+    const result = await this.read('breath', {
       ...emotionArgs(emotion),
       query: withDriveHint('近期重要记忆、情绪、关系变化和未完成事项', drives),
       max_results: this.config.breathMaxResults,
@@ -112,14 +134,16 @@ export class OmbreClient {
   // 3.3.9：exclude = 最近浮现过的桶。OB 没有排除参数，所以多要几条，本地剔掉再取回原来的条数。
   async daytimeMaterialWithRefs(drives = [], emotion = null, now = new Date(), exclude = []) {
     const want = Number(this.config.breathMaxResults) || 3;
-    const result = await this.call('breath_advanced', {
+    const maxResults = exclude.length ? Math.min(20, want + exclude.length + 2) : want;
+    const maxTokens = exclude.length ? 20000 : 12000;   // 核心准则段每次都在最前、单独就要六千上下，后面的浮现记忆得留出位置（只是字节，不过模型）
+    const result = await this.breathAdvanced({
       ...emotionArgs(emotion),
       date_from: daysAgo(now, RECENT_WINDOW_DAYS),
       mode: 'automatic',
       with_ids: true,
-      max_results: exclude.length ? Math.min(20, want + exclude.length + 2) : want,
-      max_tokens: exclude.length ? 20000 : 12000   // 核心准则段每次都在最前、单独就要六千上下，后面的浮现记忆得留出位置（只是字节，不过模型）
-    });
+      max_results: maxResults,
+      max_tokens: maxTokens
+    }, { ...emotionArgs(emotion), max_results: maxResults, max_tokens: maxTokens });
     return materialWithRefs(dropBuckets(extractText(result), exclude, want), 10000);
   }
 
@@ -130,14 +154,16 @@ export class OmbreClient {
 
   async thoughtMaterialWithRefs(drives = [], emotion = null, now = new Date(), exclude = []) {
     const want = Math.max(1, Math.min(3, Number(this.config.breathMaxResults) || 2));
-    const result = await this.call('breath_advanced', {
+    const maxResults = exclude.length ? Math.min(20, want + exclude.length + 2) : want;
+    const maxTokens = exclude.length ? 16000 : 9000;
+    const result = await this.breathAdvanced({
       ...emotionArgs(emotion),
       date_from: daysAgo(now, RECENT_WINDOW_DAYS),
       mode: 'automatic',
       with_ids: true,
-      max_results: exclude.length ? Math.min(20, want + exclude.length + 2) : want,
-      max_tokens: exclude.length ? 16000 : 9000
-    });
+      max_results: maxResults,
+      max_tokens: maxTokens
+    }, { ...emotionArgs(emotion), max_results: maxResults, max_tokens: maxTokens });
     return materialWithRefs(dropBuckets(extractText(result), exclude, want), 4000);
   }
 
@@ -173,14 +199,14 @@ export class OmbreClient {
     const dateTo = new Date(now.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
     // OB 3.6：日期过滤只在 breath_advanced 上（公开 breath 不收 date_to）
     // 同上：不传 query 走浮现道，只用 date_to 把窗口推到 30 天以前
-    const result = await this.call('breath_advanced', {
+    const result = await this.breathAdvanced({
       mode: 'automatic', max_results: 1, max_tokens: 10000, date_to: dateTo, with_ids: true,
-    });
+    });   // 老 OB 没有日期过滤：这一项不给原料（宁可梦里少一头，也不拿最近的事冒充远期）
     return materialWithRefs(extractText(result), 1500);
   }
 
   async recentContinuityMaterial(maxTokens = this.config.breathMaxTokens, emotion = null) {
-    const result = await this.call('breath', {
+    const result = await this.read('breath', {
       ...emotionArgs(emotion),
       query: [
         '新窗口近期连续性：只返回最近发生了什么，以及仍直接影响现在的人物与关系变化、生活重点和未完成约定。',
@@ -477,6 +503,15 @@ export function parseGrowBucketIds(text) {
     }
   }
   return ids;
+}
+
+export class OmbreToolError extends Error {
+  constructor(tool, text) {
+    super(`Ombre tool ${tool} failed: ${String(text).slice(0, 200)}`);
+    this.name = 'OmbreToolError';
+    this.tool = tool;
+    this.unknownTool = /unknown tool/i.test(String(text));
+  }
 }
 
 function parseMcp(text) {
