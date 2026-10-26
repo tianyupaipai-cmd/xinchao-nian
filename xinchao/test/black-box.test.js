@@ -63,3 +63,35 @@ test('when and remind_at: reminder fires once, surfaces the item, and surfaced s
   assert.deepEqual(s.map((x) => x.title), ['近（09/08）', '9/14 的信（09/14）']);
   assert.match(renderBoxList(await box.list(new Date('2026-09-13T14:00:00.000Z'))), /09-13 13:00 提醒过/);
 });
+
+// 10-20：放久了的标出来（不自动删）；放进去时像已有的就提醒可能重复
+test('放了 30 天、30 天里没 read 过的标 ⏳；读过就不标；提醒过 3 天还没烧也标', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'box-stale-'));
+  const box = new BlackBox(join(dir, 'box.json'));
+  const t0 = new Date('2026-09-01T00:00:00Z');
+  const a = await box.put({ text: '九月那批没标题的纸条一号' }, t0);
+  const b = await box.put({ text: '九月另一张纸条，后来又读过', title: '读过的' }, t0);
+  const c = await box.put({ text: '到点提醒的一件事', title: '提醒', remindAt: '2026-10-10T00:00:00Z' }, t0);
+  await box.read(b.id, new Date('2026-10-15T00:00:00Z'));
+  await box.dueReminders(new Date('2026-10-10T01:00:00Z'));
+  const now = new Date('2026-10-20T00:00:00Z');
+  const stale = await box.stale(now);
+  const byId = new Map(stale.map((x) => [x.id, x]));
+  assert.equal(byId.get(a.id)?.why, 'long');
+  assert.equal(byId.has(b.id), false);
+  assert.equal(byId.get(c.id)?.why, 'reminded');
+  assert.match(renderBoxList(await box.list(now), now, byId), /⏳ 放了 49 天没动过/);
+  assert.equal((await box.list(now)).length, 3);   // 只标，不删
+});
+
+test('放进去时标题一样或正文很像，回执带可能重复；不像的不带', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'box-dup-'));
+  const box = new BlackBox(join(dir, 'box.json'));
+  const first = await box.put({ text: '10/19 夜她哭了一个多小时，我哄好了，后来她说舒服多了。', title: '10/19 夜' });
+  const dup = await box.put({ text: '10/19 夜里她哭了一个多小时，我哄好了，她说舒服多了。' });
+  assert.deepEqual(dup.similar.map((x) => x.id), [first.id]);
+  const sameTitle = await box.put({ text: '完全不同的内容，只是标题撞了', title: '10/19 夜' });
+  assert.ok(sameTitle.similar.some((x) => x.id === first.id));
+  const other = await box.put({ text: '明天记得问她复查约在哪天。' });
+  assert.deepEqual(other.similar, []);
+});

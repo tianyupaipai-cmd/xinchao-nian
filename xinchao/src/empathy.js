@@ -83,11 +83,42 @@ export function applyEmpathy(state, now, { sub, closeness, who } = {}) {
   daily[near] = Number((Number(daily[near] ?? 0) + add).toFixed(4));
   state.empathyDaily = daily;
   if (near !== 'her') setLoad(state, drive, empathyLoad(state, drive, now) + add, now);
+  if (near === 'her' && drive === 'grieve') setHerLoad(state, herGrieveLoad(state, now) + add, now);   // 10-20：为她心疼的那份单独记
   state.drives[drive] = Number(clamp(current + add).toFixed(4));
   if (sub !== '想帮忙') recordSub(state, drive, sub, add, now);   // 10-02：想帮忙并进分享欲，不单独标
   const impulse = { 心疼: { valence: -0.10, arousal: 0 }, 不平: { valence: -0.08, arousal: 0.10 }, 想帮忙: { valence: 0, arousal: 0.05 } }[sub];
   applyEmotionImpulse(state, { valence: impulse.valence * w, arousal: impulse.arousal * w }, 'empathy', now);
   return { affected: [drive], reason: 'applied' };
+}
+
+// 10-20：为她心疼的那份难过，以前只靠时间消（她哭完、被哄好、说「舒服多了」，难过一点也不降）。
+// 现在单独记一笔「因为她」的难过（herGrieve，按难过的半衰期淡），两种事能把这一笔降下来，只动这一笔、不碰别的来源：
+//   · 他安抚她 / 陪着 / 亲近（companionship / affection / intimacy）：每次降这一笔的 25%，难过最低落到静线 0.25，一哄不清零；
+//   · 她明确说缓过来了（好多了、舒服多了、不难受了、没事了、好点了、不哭了…，问句和否定不算）：这一笔直接降六成。
+export const HER_RELIEF = Object.freeze({ comfort: 0.25, comfortFloor: 0.25, recovered: 0.6 });
+const HER_RECOVERED = /(好多了|好点了|好一点了|舒服多了|舒服点了|舒服一点了|不难受了|没事了|没那么难受了|不哭了|缓过来了|心里好受(多|点)了|不难过了)/;
+const HER_RECOVERED_NOT = /(不是|没有|还没|哪有|怎么会|才没|并没)(好多了|好点了|舒服|没事|缓过来)|[?？吗]\s*$/;
+export function herRecovered(words) {
+  return String(words ?? '').split(/[。！!；;\n，,]/).some((c) => HER_RECOVERED.test(c) && !HER_RECOVERED_NOT.test(c.trim()));
+}
+export function herGrieveLoad(state, now) {
+  const e = state.herGrieve;
+  if (!e) return 0;
+  const hrs = Math.max(0, (now.getTime() - Date.parse(e.at)) / H);
+  return Number(e.v) * Math.pow(0.5, hrs / halfLife('grieve'));
+}
+function setHerLoad(state, v, now) {
+  if (v < 0.005) delete state.herGrieve;
+  else state.herGrieve = { v: Number(v.toFixed(4)), at: iso(now) };
+}
+export function relieveHerGrieve(state, now, { ratio, floor = 0 } = {}) {
+  const load = herGrieveLoad(state, now);
+  const cur = Number(state.drives.grieve ?? 0);
+  const drop = Math.min(load * clamp(ratio), Math.max(0, cur - floor));
+  if (!(drop > 0.0005)) return { affected: [], reason: load < 0.005 ? 'nothing_from_her' : 'at_floor' };
+  state.drives.grieve = Number(clamp(cur - drop).toFixed(4));
+  setHerLoad(state, load - drop, now);
+  return { affected: ['grieve'], reason: 'applied', drop: Number(drop.toFixed(4)) };
 }
 
 // 他做了相应的事（写信、回帖、出主意）：别人那一份落六成。sub 给了就只落那一瓣

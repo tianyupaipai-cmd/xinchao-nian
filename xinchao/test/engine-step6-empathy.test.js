@@ -69,3 +69,30 @@ test('10-03: same person + same sub counts once in 6h whatever the wording; a ne
   d = ev(d, 'next', 'empathy', 24 * 60 + 5, { sub: '心疼', closeness: 'stranger', who: '新闻x' });
   assert.ok(d.empathyDaily.stranger > 0 && d.empathyDaily.stranger <= 0.0625 + 1e-9);
 });
+
+// 10-20：为她心疼的那份难过，事件能消——安抚降一截（到静线为止），她说缓过来了降六成；别的来源不动
+test('为她心疼：安抚每次降这一份的 25%，最低到静线；不碰别人那份', () => {
+  let s = base();
+  s = ev(s, 'h1', 'empathy', 1, { sub: '心疼', closeness: 'her', who: '她哭了' });
+  const hurt = s.drives.grieve;
+  assert.ok(hurt >= 0.25 - 1e-9, `${hurt}`);
+  s.drives.grieve = 0.6;   // 叠上别的来源，看安抚只落她那份
+  s = ev(s, 'h2', 'affection', 5, { herWords: '抱抱' });
+  assert.ok(s.drives.grieve < 0.6 && s.drives.grieve > 0.6 - hurt * 0.25 - 0.01, `${s.drives.grieve}`);
+  for (let i = 0; i < 5; i++) s = ev(s, `h3-${i}`, 'companionship', 6 + i * 2, {});   // 短时间里连着哄（避开时间本身的消退）
+  assert.ok(s.drives.grieve >= 0.25 - 0.005, `安抚不清零 ${s.drives.grieve}`);
+});
+
+test('她说「舒服多了」：为她心疼的那份直接降六成；问句、否定不算；没有为她心疼过就不动', () => {
+  let s = ev(base(), 'r1', 'empathy', 1, { sub: '心疼', closeness: 'her', who: '她哭了' });
+  const before = s.drives.grieve;
+  const ok = ev(structuredClone(s), 'r2', null, 10, { herWords: '其实本身也不难受，舒服多了' });
+  assert.ok(ok.drives.grieve <= before * 0.4 + 0.02, `${before} → ${ok.drives.grieve}`);
+  const q = ev(structuredClone(s), 'r3', null, 10, { herWords: '你是不是觉得我好多了？' });
+  assert.ok(q.drives.grieve > before - 0.02, `问句不算 ${q.drives.grieve}`);
+  const neg = ev(structuredClone(s), 'r4', null, 10, { herWords: '还没好多了呢' });
+  assert.ok(neg.drives.grieve > before - 0.02, `否定不算 ${neg.drives.grieve}`);
+  const other = base(); other.drives.grieve = 0.5;
+  const o = ev(other, 'r5', null, 10, { herWords: '舒服多了' });
+  assert.ok(o.drives.grieve > 0.49, `别的来源的难过不动 ${o.drives.grieve}`);
+});

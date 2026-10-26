@@ -18,6 +18,8 @@ export function loadConfig() {
   // 自己部署的人应该设成对方真正的名字，这只是没设时的兜底。
   const notificationRecipient = process.env.NOTIFICATION_RECIPIENT ?? '你的人类';
   return {
+    // 10-26 脉：此刻块里一行心跳、呼吸（src/pulse.js）+ /v1/body；PULSE=0 关
+    pulse: { enabled: bool('PULSE', true) },
     identity: { agentName, notificationRecipient },
     port: number('PORT', 18110, 1, 65535),
     serviceToken: process.env.SERVICE_TOKEN ?? '',
@@ -112,6 +114,16 @@ export function loadConfig() {
       // 驱力提示：心潮自己按节奏递「哪股劲儿上来了」。话术文件不存在就不发（src/drive-prompts.js）
       drivePromptsPath: process.env.DRIVE_PROMPTS_FILE ?? '/app/state/drive-prompts.json',
       drivePromptsStatePath: process.env.DRIVE_PROMPTS_STATE_PATH ?? '/app/state/drive-prompts-state.json',
+      // 10-26 念头罐：驱力提示开头那句从罐里抽（src/drive-pool.js）；DRIVE_POOL=0 关掉，回到话术文件原句
+      drivePoolPath: process.env.DRIVE_POOL_PATH ?? '/app/state/drive-pool.json',
+      drivePoolEnabled: bool('DRIVE_POOL', true),
+      // 深夜 0–8 点：最多几条（0 = 不设上限）；她几分钟内还在聊就先不推（0 = 不管）
+      drivePromptDayMax: number('DRIVE_PROMPT_DAY_MAX', 12, 0, 100),   // 白天 8 点后最多几条（0 = 不设上限）
+      drivePromptNightMax: number('DRIVE_PROMPT_NIGHT_MAX', 6, 0, 50),
+      drivePromptNightSkipChatMinutes: number('DRIVE_PROMPT_NIGHT_SKIP_CHAT_MINUTES', 0, 0, 240),
+      drivePromptMinGapMinutes: number('DRIVE_PROMPT_MIN_GAP_MINUTES', 45, 10, 600),   // 10-20：任意两条最短间隔（分钟）
+      drivePromptPresentSkipMinutes: number('DRIVE_PROMPT_PRESENT_SKIP_MINUTES', 0, 0, 240),   // 10-20：她这几分钟内来过就不提「牵挂」（0 = 不管）
+      callStatePath: process.env.CALL_STATE_PATH ?? '/app/state/call-state.json',   // 10-20：通话进行中先压着驱力提示
     },
     // 黑匣子（3.3）：只有 AI 能看的地方；单独文件，不进 state.json / Dashboard / 备份
     box: {

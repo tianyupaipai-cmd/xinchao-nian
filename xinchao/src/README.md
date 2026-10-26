@@ -15,6 +15,7 @@
 | `thought-pool.js` | 念头池：浮现过的记忆和梦留下的念头 |
 | `personality-store.js` | 人格内核：月度回顾 → 驱力长期偏置（见 `docs/PERSONALITY-CORE.md`） |
 | `transition-journal.js` | 每次结算的变化摘要 |
+| `pulse.js` | 脉：心跳、呼吸，由情绪、驱力、睡没睡、清早和宿主报的临时偏移（`/v1/body`）算出来；此刻块一行（`PULSE=0` 关） |
 | `core-axes.js` | 4.0 慢变底色：安全感、自信、心境（网页花蕊） |
 | `awareness.js` | 自我觉察：每周一次的自我回顾提示 |
 | `black-box.js` | 黑匣子：只有 AI 自己能看 |
@@ -40,6 +41,8 @@
 
 | 文件 | 管什么 |
 |---|---|
+| `state-stream.js` | 订阅推送：GET /v1/stream（SSE），换档、情绪换标签、睡醒、满足一变就推，不给小数 |
+| `now-lines.js` | 外接一行：别的系统往此刻块挂自己的一行（来源、过期），只在内存、只进 GET /v1/now |
 | `mcp-protocol.js` | 所有 `xinchao_*` 工具的定义和处理 |
 | `context-envelope.js` | 开窗时给 AI 的上下文包，按 token 预算裁剪 |
 | `interaction-messages.js` | 互动事件之后推给 AI 的一句话 |
@@ -54,6 +57,8 @@
 |---|---|
 | `bridge-queue.js` | 主动消息的投递队列，配合仓库根目录的 `bridge/` |
 | `self-signals.js` | 人不在时 AI 身上发生的事，排进桥里 |
+| `drive-prompts.js` | 驱力提示：心潮按节奏自己递「哪股劲儿上来了」，通话中先压着、挂了补汇总 |
+| `drive-pool.js` | 念头罐：驱力提示开头那句按「劲儿 × 时段」各一罐，抽一句少一句，快见底自己续罐（`DRIVE_POOL=0` 关） |
 | `bark-client.js` / `bark-dedupe.js` | Bark 手机推送和去重（可选） |
 | `wake-bridge-protocol.js` | 旧引用兼容 |
 

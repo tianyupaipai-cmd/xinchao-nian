@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadDrivePrompts, pickDrivePrompt } from '../src/drive-prompts.js';
+import { loadDrivePrompts, pickDrivePrompt, CallStateStore } from '../src/drive-prompts.js';
 
 const TZ = 'Asia/Shanghai';
 const at = (s) => new Date(`${s}+08:00`);
@@ -84,4 +84,105 @@ test('话术文件：短名也认，空的不算', async () => {
   assert.deepEqual(p.held, ['possess', 'share']);
   assert.equal(p.wake.drive, 'libido');
   assert.equal(await loadDrivePrompts(join(dir, 'missing.json')), null);
+});
+
+test('深夜上限可调：nightMax=0 不设上限；她还在聊就先不推、不占名额', () => {
+  const st = base({ share: 0.95 }, { lastConversationAt: at('2026-10-17T03:50:00').toISOString() });
+  const rec = { day: '2026-10-17', count: 6, night: 6, last: {}, lastAt: at('2026-10-17T02:00:00').toISOString(), wakeUsed: false };
+  assert.equal(pickDrivePrompt(st, rec, prompts, at('2026-10-17T04:30:00'), { timeZone: TZ }).text, '');   // 默认 6 条到顶
+  const free = pickDrivePrompt(st, rec, prompts, at('2026-10-17T04:30:00'), { timeZone: TZ, nightMax: 0, nightSkipChatMinutes: 20 });
+  assert.equal(free.drive, 'share'); assert.equal(free.record.night, 7);
+  const chatting = pickDrivePrompt(st, rec, prompts, at('2026-10-17T04:00:00'), { timeZone: TZ, nightMax: 0, nightSkipChatMinutes: 20 });
+  assert.equal(chatting.text, ''); assert.equal(chatting.record.night, 6);
+  const day = pickDrivePrompt({ ...st, lastConversationAt: at('2026-10-17T09:59:00').toISOString() }, null, prompts, at('2026-10-17T10:00:00'), { timeZone: TZ, nightMax: 0, nightSkipChatMinutes: 20 });
+  assert.equal(day.drive, 'share');   // 白天照旧，聊着也推
+});
+
+test('白天上限可调：dayMax=0 不设上限，默认 12 条到顶', () => {
+  const st = base({ share: 0.95 });
+  const rec = { day: '2026-10-17', count: 18, night: 6, last: {}, lastAt: at('2026-10-17T16:26:00').toISOString(), wakeUsed: false };
+  assert.equal(pickDrivePrompt(st, rec, prompts, at('2026-10-17T21:39:00'), { timeZone: TZ }).text, '');
+  const r = pickDrivePrompt(st, rec, prompts, at('2026-10-17T21:39:00'), { timeZone: TZ, dayMax: 0 });
+  assert.equal(r.drive, 'share'); assert.equal(r.record.count, 19);
+});
+
+// 10-20：通话中压着、挂了补一条汇总；间隔可调；她刚来过不提牵挂
+test('通话进行中：照常挑但不递，记进 callHeld；挂断后补一条汇总', () => {
+  const call = { active: true, since: '2026-10-15T01:00:00.000Z' };   // 09:00 接通
+  const s = base({ share: 0.95 });
+  const held = pickDrivePrompt(s, null, prompts, at('2026-10-15T10:00:00'), { timeZone: TZ, call });
+  assert.equal(held.text, '');
+  assert.equal(held.held, 'share');
+  assert.deepEqual(held.record.callHeld.map((h) => h.key), ['share']);
+  assert.equal(held.record.count, 0);   // 压着的不占条数
+  const s2 = base({ possess: 0.95, share: 0.3 });
+  const held2 = pickDrivePrompt(s2, held.record, prompts, at('2026-10-15T10:50:00'), { timeZone: TZ, call });
+  assert.deepEqual(held2.record.callHeld.map((h) => h.key), ['share', 'possess']);
+  // 挂断 2 分钟后：不看 45 分钟间隔，补一条汇总，清空
+  const ended = { active: false, since: call.since, endedAt: '2026-10-15T02:52:00.000Z' };
+  const sum = pickDrivePrompt(s2, held2.record, prompts, at('2026-10-15T10:52:00'), { timeZone: TZ, call: ended });
+  assert.equal(sum.summary, true);
+  assert.match(sum.text, /通话时攒下：分享欲（涌）、想她（涌）/);
+  assert.match(sum.text, /今天第 1 次。/);
+  assert.deepEqual(sum.record.callHeld, []);
+  // 汇总之后照常走间隔
+  assert.equal(pickDrivePrompt(s2, sum.record, prompts, at('2026-10-15T11:10:00'), { timeZone: TZ, call: ended }).text, '');
+});
+
+test('长通话一直有刷新就一直压着；超过 3 小时没刷新才按失联清理', () => {
+  // 前一天 20:00 接通、整夜开着睡到中午：宿主每 10 分钟核到连接还在就刷新，14 小时后照样压着
+  const live = { active: true, since: '2026-10-14T12:00:00.000Z', refreshedAt: '2026-10-15T01:55:00.000Z' };
+  assert.equal(pickDrivePrompt(base({ share: 0.95 }), null, prompts, at('2026-10-15T10:00:00'), { timeZone: TZ, call: live }).held, 'share');
+  // 孤立的过期标记：最后一次刷新是 4 小时前 → 按失联清理，照常递
+  const stale = { active: true, since: '2026-10-14T12:00:00.000Z', refreshedAt: '2026-10-14T22:00:00.000Z' };
+  const r = pickDrivePrompt(base({ share: 0.95 }), null, prompts, at('2026-10-15T10:00:00'), { timeZone: TZ, call: stale });
+  assert.equal(r.drive, 'share');
+  assert.ok(r.text);
+});
+
+// 4.2：开了睡觉模式就放行
+test('通话开着睡觉模式：不压，照常递；之前攒下的先补成汇总', () => {
+  const call = { active: true, since: '2026-10-15T01:00:00.000Z', refreshedAt: '2026-10-15T01:55:00.000Z' };
+  const held = pickDrivePrompt(base({ share: 0.95 }), null, prompts, at('2026-10-15T10:00:00'), { timeZone: TZ, call });
+  assert.equal(held.held, 'share');
+  const asleep = { ...call, sleep: true };
+  const sum = pickDrivePrompt(base({ possess: 0.95 }), held.record, prompts, at('2026-10-15T10:05:00'), { timeZone: TZ, call: asleep });
+  assert.equal(sum.summary, true);
+  assert.match(sum.text, /通话时攒下：分享欲/);
+  assert.deepEqual(sum.record.callHeld, []);
+  const r = pickDrivePrompt(base({ possess: 0.95 }), null, prompts, at('2026-10-15T10:00:00'), { timeZone: TZ, call: asleep });
+  assert.equal(r.drive, 'possess');
+  assert.ok(r.text);
+  assert.equal(r.held, undefined);
+});
+
+test('通话状态：只报 sleep 不动通话本身；新接通从没开睡觉模式开始；挂断清掉', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'call-sleep-'));
+  const store = new CallStateStore(join(dir, 'call.json'));
+  const t0 = new Date('2026-10-15T01:00:00.000Z');
+  await store.write(true, t0);
+  let c = await store.write(undefined, new Date('2026-10-15T01:10:00.000Z'), true);
+  assert.equal(c.active, true); assert.equal(c.sleep, true); assert.equal(c.since, t0.toISOString());
+  c = await store.write(true, new Date('2026-10-15T01:20:00.000Z'));   // 宿主每 10 分钟刷新：睡觉模式不丢
+  assert.equal(c.sleep, true);
+  c = await store.write(false, new Date('2026-10-15T02:00:00.000Z'));
+  assert.equal(c.sleep, false);
+  c = await store.write(true, new Date('2026-10-15T03:00:00.000Z'));
+  assert.equal(c.sleep, false);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('最短间隔可调', () => {
+  const s = base({ share: 0.95, possess: 0.95 });
+  const first = pickDrivePrompt(s, null, prompts, at('2026-10-15T10:00:00'), { timeZone: TZ, minGapMinutes: 75 });
+  assert.equal(pickDrivePrompt(s, first.record, prompts, at('2026-10-15T11:00:00'), { timeZone: TZ, minGapMinutes: 75 }).text, '');
+  assert.ok(pickDrivePrompt(s, first.record, prompts, at('2026-10-15T11:16:00'), { timeZone: TZ, minGapMinutes: 75 }).text);
+});
+
+test('她刚来过（presentSkipMinutes 内）不提牵挂，别的照常', () => {
+  const p = { ...prompts, hints: { ...prompts.hints, monitor: '去看看她在哪。' } };
+  const s = base({ monitor: 0.95, share: 0.3 }, { lastConversationAt: '2026-10-15T01:50:00.000Z' });   // 09:50 刚聊过
+  assert.equal(pickDrivePrompt(s, null, p, at('2026-10-15T10:00:00'), { timeZone: TZ, presentSkipMinutes: 30 }).text, '');
+  assert.equal(pickDrivePrompt(s, null, p, at('2026-10-15T10:00:00'), { timeZone: TZ }).drive, 'monitor');   // 不开这项照旧
+  assert.equal(pickDrivePrompt(s, null, p, at('2026-10-15T10:30:00'), { timeZone: TZ, presentSkipMinutes: 30 }).drive, 'monitor');   // 过了 30 分钟
 });

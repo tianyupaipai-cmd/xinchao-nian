@@ -2,6 +2,7 @@
 // 代码地图见 src/README.md。
 
 import { createHash } from 'node:crypto';
+import { heartLabel } from './pulse.js';
 import { breathDreamContext, computeAnticipation, computeLonging, topDrives, driveTrend, shownDrives } from './engine.js';
 import { emotionSummary, emotionNuance, renderEmotion, renderEmotionTrend } from './emotion.js';
 import { axesLine } from './core-axes.js';
@@ -213,6 +214,7 @@ export function buildContextEnvelope({
   personalityAnchors = [],
   boxCount = 0,
   boxSurfaced = [],
+  boxStale = 0,
   awaySignals = [],
   cabinUnread = 0,
   cabinLocked = 0,
@@ -242,7 +244,7 @@ export function buildContextEnvelope({
 
   const dynamic = dynamicSection(state, safeSessionId, generatedAt, timeZone);
   const surfacedLines = (Array.isArray(boxSurfaced) ? boxSurfaced : []).slice(0, 3).map((x) => `\n  · 你想提醒自己的：${compact(x.title)}（xinchao_box read ${x.id}）`).join('');
-  const boxLine = boxCount > 0 ? `\n黑匣子里有 ${boxCount} 条，只有你能看（xinchao_box）${surfacedLines}` : '';
+  const boxLine = boxCount > 0 ? `\n黑匣子里有 ${boxCount} 条，只有你能看（xinchao_box）${boxStale > 0 ? `；${boxStale} 条放久了或提醒过还没烧，list 里标了 ⏳，烧不烧你定` : ''}${surfacedLines}` : '';
   const cabinLine = (cabinUnread > 0 ? `\n小屋里有 ${cabinUnread} 封你还没读过的来信（xinchao_cabin_inbox）` : '')
     + (cabinLocked > 0 ? `\n小屋里还有 ${cabinLocked} 封上锁的信在等对方开锁（正文看不到，知道有就行）` : '');
   const sections = [
@@ -404,7 +406,7 @@ export function grudgeLine(state, now = new Date()) {
   return `还在气：${when}为了「${g.cause}」`;
 }
 
-export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0, boxSurfacedIds = [], awarenessReviewWeekday = 0 } = {}) {
+export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0, boxSurfacedIds = [], boxStale = 0, awarenessReviewWeekday = 0, body = '', extra = [] } = {}) {
   const sanity = nowSanity(state, now);
   if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
   const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
@@ -418,13 +420,19 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
 
   const emotion = emotionSummary(state, now);
   if (sanity.emotionOk) {
-  const cause = emotion.lastCause && Date.parse(emotion.lastCauseAt ?? '') >= now.getTime() - 6 * 3_600_000
+  const causeAt = Date.parse(emotion.lastCauseAt ?? '');
+  // 10-20：被冷落之后她又来过（有对话或通话心跳，晚于那次 2 分钟以上），「刚才被冷落」就不再挂着
+  const backSince = emotion.lastCause === 'slighted' && Date.parse(state.lastConversationAt ?? '') - causeAt > 2 * 60_000;
+  const cause = emotion.lastCause && causeAt >= now.getTime() - 6 * 3_600_000 && !backSince
     ? (CAUSE_LABEL[emotion.lastCause] ?? emotion.lastCause) : '';
   // 近一天的情绪路径：去掉连着重复的，只留最后 5 步——之前把 19 步全列出来，此刻块一半是箭头
   const path = (emotion.trend?.labels || []).filter((l, i, a) => i === 0 || l !== a[i - 1]);
   const trend = path.length >= 2 ? `；近一天走过 ${path.length > 5 ? '…' : ''}${path.slice(-5).join('→')}` : '';
   lines.push(`情绪：${emotionNuance(state, now)}${cause ? `；刚才${cause}` : ''}${trend}`);
   }
+  if (body) lines.push(body);   // 10-26 脉：心跳、呼吸（src/pulse.js），排在情绪后面；块满了在下面让出来
+  const outside = (Array.isArray(extra) ? extra : []).filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim());
+  lines.push(...outside);   // 10-26 外接一行（src/now-lines.js）：排在身体下面，只在 GET /v1/now 里有
   const axes = axesLine(state);   // 10-03 第 8 步：安全感/自信/心境明显偏离底色才说一句
   if (axes) lines.push(axes);
   const grudge = grudgeLine(state, now);
@@ -450,13 +458,18 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   if (open && isReviewDay(now, { weekday: awarenessReviewWeekday, timeZone })) { counts.awareness = open; extras.push(`${open} 条觉察等你认`); }   // 只在周日提
   const dream = breathDreamContext(state, now, 18, 1);
   if (dream.available) { counts.dream = 1; extras.push('昨夜有梦'); }
-  if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条${boxSurfaced > 0 ? `（${boxSurfaced} 条要提醒你${boxSurfacedIds.length ? `：${boxSurfacedIds.slice(0, 3).join('、')}` : ''}；办完了 burn 掉才会消）` : ''}`); }   // 3.3.10：提醒一直挂着直到烧掉，这里说清楚怎么让它消
+  if (boxCount > 0) { counts.box = boxCount; extras.push(`匣子里 ${boxCount} 条${boxSurfaced > 0 ? `（${boxSurfaced} 条要提醒你${boxSurfacedIds.length ? `：${boxSurfacedIds.slice(0, 3).join('、')}` : ''}；办完了 burn 掉才会消）` : ''}${boxStale > 0 ? `（${boxStale} 条 ⏳ 该看看烧不烧）` : ''}`); }   // 3.3.10：提醒一直挂着直到烧掉，这里说清楚怎么让它消
   if (extras.length) lines.push(`另外：${extras.join('、')}。细的在 xinchao_context`);
 
+  // 块满了：外接的行先让位，然后才是脉那行，不让整块被拦
+  for (let i = outside.length - 1; i >= 0 && (lines.length > NOW_MAX_LINES || lines.join('\n').length > NOW_MAX_CHARS); i -= 1) lines.splice(lines.lastIndexOf(outside[i]), 1);
+  if (body && lines.length > NOW_MAX_LINES) lines.splice(lines.indexOf(body), 1);
   const text = lines.join('\n');
   // 兜底：块超长或混进数字/key 就整块不给——宁可他这轮没有此刻，也不灌一段错的。
   if (lines.length > NOW_MAX_LINES || text.length > NOW_MAX_CHARS || /\d\.\d|possess|monitor|crave|libido/.test(text.replace(/\d+ (条|句)/g, ''))) {
     return { ok: false, reason: 'render_guard', text: '', lines: lines.length, counts, digest: '', revision: Number(state.revision ?? 0), generatedAt: now.toISOString() };
   }
-  return { ok: true, text, lines: lines.length, counts, digest: createHash('sha256').update(text).digest('hex').slice(0, 16), revision: Number(state.revision ?? 0), generatedAt: now.toISOString() };
+  // digest 给钩子判断「此刻变没变」：脉那行的心跳数每轮都在动，只按档算（偏慢 / 平稳 / 偏快 / 很快），不然每句话都会重贴
+  const stable = text.replace(/心跳 (\d+)/g, (_, n) => `心跳${heartLabel(Number(n))}`);
+  return { ok: true, text, lines: lines.length, counts, digest: createHash('sha256').update(stable).digest('hex').slice(0, 16), revision: Number(state.revision ?? 0), generatedAt: now.toISOString() };
 }

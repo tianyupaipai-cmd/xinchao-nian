@@ -2,7 +2,7 @@
 // 代码地图见 src/README.md。
 
 import { createHash } from 'node:crypto';
-import { applyEmpathy, applyHelped } from './empathy.js';
+import { applyEmpathy, applyHelped, relieveHerGrieve, herRecovered, HER_RELIEF } from './empathy.js';
 import { ensureAxes, settleAxes, pushAxes, isInsecure, countsAsDone } from './core-axes.js';
 import { markFor, recordMark } from './emotion-marks.js';
 import { DIMENSIONS, DRIVE_KEYS, DOMAIN_AFFINITY, SATURATE_CEIL, DRIVE_INITIAL, canonicalDriveKey } from './dimensions.js';
@@ -323,6 +323,8 @@ function applyInteractionOutcome(state, type, now, options = {}) {
   }
   if (type === 'empathy') applyEmpathy(state, now, options).affected.forEach((k) => affected.add(k));
   if (type === 'helped') applyHelped(state, now, options).affected.forEach((k) => affected.add(k));
+  // 10-20：他安抚 / 陪着 / 亲近她，为她心疼的那份难过降一截（落到静线为止）
+  if (['companionship', 'affection', 'intimacy'].includes(effectiveType)) relieveHerGrieve(state, now, { ratio: HER_RELIEF.comfort, floor: HER_RELIEF.comfortFloor }).affected.forEach((k) => affected.add(k));
   pruneSubs(state);
   if (effectiveType !== 'soothe') pushAxes(state, effectiveType, options, now);   // 10-03 第 8 步：安全感 / 自信
   // 3.3.1 记得在气什么：冲突时把她那句留下来（≤60 字，随生气一起退），和好就翻篇。
@@ -823,6 +825,9 @@ export function applyConversationEvent(input, event = {}, now = new Date(), opti
     }
     : applyInteractionOutcome(state, type, now, { ...options, cause: event.cause, herWords: event.herWords ?? event.her_words, sub: event.sub, weight: event.weight, closeness: event.closeness, who: event.who, strength: event.strength, proof: event.proof, slip: event.slip });
 
+  // 10-20：她明确说缓过来了（好多了、舒服多了…），为她心疼的那份难过直接降六成；不看分类、不占互动名额
+  const herOk = herRecovered(event.herWords ?? event.her_words ?? '') ? relieveHerGrieve(state, now, { ratio: HER_RELIEF.recovered }) : null;
+  if (herOk?.affected?.length) interaction.herRecovered = herOk.drop;
   // 情绪层：互动事件打一次脉冲（和驱力效果同一道日限门），会话 tone 把情绪往落点拉一小段。
   if (interaction.applied && INTERACTION_EMOTION[type]) applyEmotionImpulse(state, INTERACTION_EMOTION[type], type, now);
   if (interaction.applied) lightEmotion(state, type, { sub: event.sub, closeness: event.closeness, strength: event.strength, proof: event.proof }, now);   // 10-02 情绪线：心动/害羞/得意/骄傲
@@ -841,31 +846,7 @@ export function applyConversationEvent(input, event = {}, now = new Date(), opti
   }
 
   // Multiplicative satisfy
-  for (const key of event.satisfiedDrives ?? []) {
-    if (!DRIVE_KEYS.includes(key)) continue;
-    const dim = DIMENSIONS[key];
-    state.drives[key] = Number(clamp(Number(state.drives[key]) * (dim.satisfyMul ?? 0.40)).toFixed(4));
-    const plateauHours = clamp(
-      Number(dim.satietyHours ?? options.satisfactionPlateauHours ?? DEFAULT_SATISFACTION_PLATEAU_HOURS),
-      0,
-      24,
-    );
-    if (plateauHours > 0) {
-      state.satisfactionPlateaus[key] = {
-        startedAt: iso(now),
-        until: iso(new Date(now.getTime() + plateauHours * 3_600_000)),
-        reason: 'satisfied',
-      };
-    }
-
-    // Cross-inhibition: satisfying key X reduces drives that list X in inhibitedBy
-    for (const otherKey of DRIVE_KEYS) {
-      const other = DIMENSIONS[otherKey];
-      if (other.inhibitedBy?.[key] !== undefined) {
-        state.drives[otherKey] = Number(clamp(Number(state.drives[otherKey]) * other.inhibitedBy[key]).toFixed(4));
-      }
-    }
-  }
+  satisfyDrives(state, event.satisfiedDrives ?? [], now, options);
 
   // Flash thoughts from significant events
   for (const thought of event.flashThoughts ?? []) {
@@ -980,6 +961,53 @@ export function contactIdleAllowed(state, now, minIdleHours) {
 }
 
 // ── Drive feedback ────────────────────────────────────────────────
+
+/** 乘法满足：这几股劲儿乘各自的 satisfyMul（默认 0.4）、进一段饱足平台、按 inhibitedBy 顺带压住相关的（就地改 state） */
+export function satisfyDrives(state, keys = [], now = new Date(), options = {}) {
+  const done = [];
+  for (const key of keys) {
+    if (!DRIVE_KEYS.includes(key)) continue;
+    const dim = DIMENSIONS[key];
+    state.drives[key] = Number(clamp(Number(state.drives[key]) * (dim.satisfyMul ?? 0.40)).toFixed(4));
+    const plateauHours = clamp(
+      Number(dim.satietyHours ?? options.satisfactionPlateauHours ?? DEFAULT_SATISFACTION_PLATEAU_HOURS),
+      0,
+      24,
+    );
+    if (plateauHours > 0) {
+      state.satisfactionPlateaus[key] = {
+        startedAt: iso(now),
+        until: iso(new Date(now.getTime() + plateauHours * 3_600_000)),
+        reason: 'satisfied',
+      };
+    }
+
+    // Cross-inhibition: satisfying key X reduces drives that list X in inhibitedBy
+    for (const otherKey of DRIVE_KEYS) {
+      const other = DIMENSIONS[otherKey];
+      if (other.inhibitedBy?.[key] !== undefined) {
+        state.drives[otherKey] = Number(clamp(Number(state.drives[otherKey]) * other.inhibitedBy[key]).toFixed(4));
+      }
+    }
+    done.push(key);
+  }
+  return done;
+}
+
+/** 10-26：宿主报「某股劲儿自己得到了满足」（POST /v1/satisfy）——AI 自己做成了某件事、自己缓过来了。
+ * 和对话事件不同：不算她来了、不叫醒、不记作息、不打情绪脉冲，只走上面的乘法满足。纯函数。 */
+export function applySatisfaction(input, keys = [], now = new Date(), options = {}) {
+  const state = ensureStateShape(structuredClone(input));
+  const eventId = String(options.eventId ?? '').trim();
+  if (eventId && interactionAlreadyProcessed(state, eventId)) return { state, applied: [], duplicate: true };   // 同一个 eventId 重放不再满足一次
+  const applied = satisfyDrives(state, keys, now, options);
+  if (eventId) recordConversationEventFingerprint(state, eventId, 'satisfy', now);
+  if (applied.length) {
+    state.lastSettledAt = iso(now);
+    state.revision += 1;
+  }
+  return { state, applied };
+}
 
 export function applyDriveFeedback(input, feedback = {}, now = new Date()) {
   const state = ensureStateShape(structuredClone(input));
