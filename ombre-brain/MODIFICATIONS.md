@@ -48,6 +48,13 @@ P0luz/Ombre-Brain（原项目, MIT, © P0lar1zzZ）
    - 目的：客户端（claude.ai 连接器）等不到 grow 返回先超时、服务端其实已写入，上层 AI
      误以为失败重试，同一段日记被反复拆成新桶。additive，不改任何既有写入路径的行为。
 
+6. **时间带时区（4.2.1）**
+   - `src/utils.py`：`now_iso()` 写入时带本地时区偏移（`…+00:00`），原先是不带时区的本地时间。
+     `parse_iso_datetime` 本来就会把带偏移的时间归一成本地时间，进程内比较行为不变。
+   - `frontend/dashboard.html`：新增 `parseBucketDate()`，不带时区的旧时间按 UTC 读（容器本地时间
+     就是 UTC），「多久以前」和 45 天未活跃判断都改用它。
+   - 目的：Dashboard 在 UTC+8 浏览器里把记忆时间多算 8 小时、日期落到前一天（用户反馈）。
+
 > OB 原生功能全部保留：breath / hold / grow / dream / trace / anchor / release / forget /
 > restore / purge / I / plan / letter / pulse 与 Dashboard。心潮念只做上述增量，不裁剪。
 

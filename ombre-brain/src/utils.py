@@ -728,7 +728,11 @@ def count_tokens_approx(text: str) -> int:
 
 def now_iso() -> str:
     """
-    Return current time as ISO format string.
-    返回当前时间的 ISO 格式字符串。
+    Return current time as ISO format string, with the local UTC offset.
+    返回当前时间的 ISO 格式字符串，带本地时区偏移（如 2026-10-28T21:32:35+00:00）。
+
+    以前是裸的本地时间，不带偏移。Docker 里本地时间就是 UTC，后台网页又把不带时区的
+    时间当浏览器本地时间读，UTC+8 下「多久以前」多算 8 小时、日期落到前一天。
+    带上偏移后 parse_iso_datetime 照样能读（会归一成本地时间），进程内比较不变。
     """
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now().astimezone().isoformat(timespec="seconds")

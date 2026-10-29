@@ -5147,9 +5147,17 @@ window._updateWeightLabel = function(v) {
   if (el) el.textContent = v + '% · ' + weightAnchorLabel(parseFloat(v) / 100);
 };
 
+// 旧记忆的时间不带时区（写的是容器本地时间，Docker 里就是 UTC）；直接 new Date 会被当成浏览器本地时间，
+// UTC+8 下「多久以前」多算 8 小时、日期落到前一天。不带时区的一律按 UTC 读；新写的带偏移，原样读
+function parseBucketDate(iso) {
+  var s = String(iso || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) s += 'Z';
+  return new Date(s);
+}
+
 function formatTimeAgo(iso) {
   if (!iso) return '—';
-  var d = new Date(iso);
+  var d = parseBucketDate(iso);
   var now = new Date();
   var hours = Math.floor((now - d) / 3600000);
   if (hours < 1) return '刚刚';
@@ -5161,7 +5169,7 @@ function formatTimeAgo(iso) {
 
 function daysSince(iso) {
   if (!iso) return 0;
-  var d = new Date(iso);
+  var d = parseBucketDate(iso);
   if (isNaN(d)) return 0;
   return (Date.now() - d.getTime()) / 86400000;
 }
