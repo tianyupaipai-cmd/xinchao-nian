@@ -12,6 +12,8 @@
 >
 > **从 3.3 升级** → [4.0 升级说明](docs/4.0/升级说明.md)（先备份 `state.json`）
 
+> **4.3.0（2026-10-31）**：驱力提示会「攒着」——对方在忙、正在通话时能攒的先攒着，晚点合成一条一起说，说之前再核一遍（思路借 [Kirie](https://github.com/khaterdev/kirie)）；挂一行有了轻重（`priority`）；做梦可以单独换模型；网页花瓣看得到涨落、细项、刚满足和 24 小时起伏。升级：拉新代码、重建容器即可，旧配置照常能用。详见 [CHANGELOG](xinchao/CHANGELOG.md)。
+
 > **4.2.1（2026-10-29）**：修 OB 后台网页在 UTC+8 下把记忆时间多算 8 小时（「8h前」、日期落到前一天）的问题，只是显示错，记忆本身没事。详见 [CHANGELOG](xinchao/CHANGELOG.md)。
 
 > **4.1.1（2026-10-20）**：修一起打包的 OB 没有 `breath_advanced` 时，白天浮现 / 自主念头把报错当记忆原文的问题，自动退回 `breath`。详见 [CHANGELOG](xinchao/CHANGELOG.md)。

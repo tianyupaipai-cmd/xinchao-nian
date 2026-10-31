@@ -87,6 +87,12 @@ export function createAttentionWatch({ enabled, rulesPath, statePath, readState,
       st.company = { kind: c.kind, weight: c.weight, ts: now };
       await save(st);
     },
+    // 10-29 驱力「攒着」用：她说了正跟谁在一起（companyHours 内有效）就算她在忙，能攒的驱力先攒着。没开注意力监测就永远是空
+    async busyNow(now = Date.now()) {
+      if (!enabled) return '';
+      const c = (await load()).company;
+      return c?.ts && now - c.ts < rules().companyHours * 60 * MIN ? '她在忙' : '';
+    },
     async tick(now = Date.now()) {
       if (!enabled) return null;
       const st = await load();

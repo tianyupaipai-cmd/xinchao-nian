@@ -17,7 +17,11 @@ test('外接一行：校验——一行、60 字内、不带小数和驱力 key�
   assert.ok(validateNowLine({ source: 'a', text: '有 0.8 小数', minutes: 5 }).error);
   assert.ok(validateNowLine({ source: 'a', text: 'libido 字样', minutes: 5 }).error);
   assert.ok(validateNowLine({ source: 'a', text: '长'.repeat(61), minutes: 5 }).error);
-  assert.deepEqual(validateNowLine({ source: '外接', text: '【外接】一句', minutes: 15 }), { source: '外接', text: '【外接】一句', minutes: 15 });
+  assert.deepEqual(validateNowLine({ source: '外接', text: '【外接】一句', minutes: 15 }), { source: '外接', text: '【外接】一句', minutes: 15, priority: 3 });
+  assert.ok(validateNowLine({ source: 'a', text: 'x', minutes: 5, priority: 0 }).error);
+  assert.ok(validateNowLine({ source: 'a', text: 'x', minutes: 5, priority: 6 }).error);
+  assert.ok(validateNowLine({ source: 'a', text: 'x', minutes: 5, priority: 2.5 }).error);
+  assert.equal(validateNowLine({ source: 'a', text: 'x', minutes: 5, priority: '1' }).priority, 1);
 });
 
 test('外接一行：同来源覆盖、最多 3 个来源、到期自动没了、GET 不回内容', () => {
@@ -34,6 +38,21 @@ test('外接一行：同来源覆盖、最多 3 个来源、到期自动没了�
   assert.ok(!JSON.stringify(n.sources(t0)).includes(SECRET));
   assert.ok(n.remove('e'));
   assert.deepEqual(n.texts(t0), []);
+});
+
+test('外接一行 4.3 优先级：满了挤掉最不要紧的；一样要紧不挤；此刻里要紧的在前', () => {
+  const n = new NowLines();
+  const t0 = T.getTime();
+  n.set({ source: '天气', text: '外面下雨', minutes: 30, priority: 4 }, t0);
+  n.set({ source: '余温', text: '刚看完一集', minutes: 30 }, t0 + 1);          // 默认 3
+  n.set({ source: '脉', text: '心跳偏快', minutes: 30, priority: 4 }, t0 + 2);
+  assert.deepEqual(n.texts(t0 + 3), ['刚看完一集', '外面下雨', '心跳偏快']);   // 3 在前，两个 4 按先挂
+  const r = n.set({ source: '盼头', text: '约了九点', minutes: 30, priority: 2 }, t0 + 4);
+  assert.equal(r.evicted, '天气');                                              // 两个 4 里挤最早挂的
+  assert.deepEqual(n.texts(t0 + 5), ['约了九点', '刚看完一集', '心跳偏快']);
+  assert.equal(n.set({ source: '环境', text: '深夜', minutes: 30, priority: 4 }, t0 + 6).status, 409);   // 不比最不要紧的更要紧
+  assert.equal(n.set({ source: '别的', text: '也是三', minutes: 30 }, t0 + 7).evicted, '脉');           // 默认 3 比剩下的 4 要紧，挤掉它
+  assert.equal(n.set({ source: '再一个', text: '还是三', minutes: 30 }, t0 + 8).status, 409);            // 剩下都是 2、3，一样要紧不挤
 });
 
 test('外接一行：排在身体下面；块满了外接的先让位，不让整块被拦', () => {
@@ -65,4 +84,11 @@ test('外接一行：挂的内容不出现在任何别的出口（只有 GET /v1
   // 4) 模块本身不碰文件
   const mod = readFileSync(new URL('../src/now-lines.js', import.meta.url), 'utf8');
   assert.ok(!/node:fs|writeFile|readFile/.test(mod));
+});
+
+test('/v1/drives：只给短名、档位、满足没有、念头罐那句，不给小数', () => {
+  const src = readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  const at = src.indexOf("url.pathname === '/v1/drives'");
+  const block = src.slice(at, src.indexOf("return send(response, 200, { drives", at));
+  assert.ok(at > 0 && !/value:|Number\(state\?\.drives\?\.\[key\]\)\s*[,}]/.test(block.replace('driveLevel(key, Number(state?.drives?.[key])', '')));
 });

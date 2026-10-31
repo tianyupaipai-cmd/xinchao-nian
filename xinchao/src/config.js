@@ -46,6 +46,14 @@ export function loadConfig() {
       agentName,
       notificationRecipient,
     },
+    // 10-29 做梦可以单独换模型（写梦 + 醒来递的那句梦话）：DREAM_MODEL_BASE_URL / DREAM_MODEL_API_KEY / DREAM_MODEL_NAME，
+    // 哪项没配就沿用上面 MODEL_* 那一项。打标签、闪念、月度回顾等照旧用 MODEL_*。
+    // Gemini 用它的 OpenAI 兼容地址：https://generativelanguage.googleapis.com/v1beta/openai
+    dreamModel: {
+      baseUrl: (process.env.DREAM_MODEL_BASE_URL ?? '').replace(/\/$/, ''),
+      apiKey: process.env.DREAM_MODEL_API_KEY ?? '',
+      name: process.env.DREAM_MODEL_NAME ?? '',
+    },
     dreamMinIntervalHours: number('DREAM_MIN_INTERVAL_HOURS', 6, 1, 168),
     dreamMaxPerDay: number('DREAM_MAX_PER_DAY', 4, 1, 12),
     dreamEnabled: bool('DREAM_ENABLED', true),

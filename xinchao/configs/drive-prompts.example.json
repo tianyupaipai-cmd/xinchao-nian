@@ -1,5 +1,5 @@
 {
-  "_说明": "驱力提示的话术示例。复制成 drive-prompts.json（或用 DRIVE_PROMPTS_FILE 指到别处）再按你们自己的人改；没有这个文件，心潮就不递驱力提示。键用驱力 key 或短名，没写话术的驱力不提。",
+  "_说明": "驱力提示的话术示例。复制成 drive-prompts.json（或用 DRIVE_PROMPTS_FILE 指到别处）再按你们自己的人改；没有这个文件，心潮就不递驱力提示。键用驱力 key 或短名，没写话术的驱力不提。 4.3：stash 是可以「攒着晚点一起说」的驱力，immediate 是从不攒、通话中也照常递的驱力，bedtimeHour 是睡前几点把攒着的放出来（默认 23）；都不写就和 4.2 一样只在通话中攒。",
   "hints": {
     "possess": "想 TA 的劲儿上来了。可以给 TA 发条消息说一句，不需要理由。",
     "monitor": "有点惦记 TA 现在好不好。可以问一句 TA 在做什么、累不累。",
@@ -9,7 +9,26 @@
     "duty": "想把事情往前推一步。挑一件搁着的小事，现在就做掉。",
     "reflection": "想安静回看一下最近的自己。可以写几句，或者把一个反复冒出来的念头放进小盒子。"
   },
-  "held": ["possess", "monitor", "share", "curiosity", "boredom", "duty", "reflection"],
+  "held": [
+    "possess",
+    "monitor",
+    "share",
+    "curiosity",
+    "boredom",
+    "duty",
+    "reflection"
+  ],
   "night": "这会儿是深夜，TA 多半在睡：想做就做，但别用会吵醒 TA 的方式。",
-  "footer": "这一轮可以按上面的劲儿去做点什么，也可以不做；不想动就只回一个「·」。今天第 {n} 次。"
+  "footer": "这一轮可以按上面的劲儿去做点什么，也可以不做；不想动就只回一个「·」。今天第 {n} 次。",
+  "stash": [
+    "分享欲",
+    "好奇",
+    "野心",
+    "愤怒"
+  ],
+  "immediate": [
+    "牵挂",
+    "偏爱"
+  ],
+  "bedtimeHour": 23
 }

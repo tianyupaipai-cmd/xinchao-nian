@@ -212,10 +212,12 @@ export class ModelClient {
   }
 
   request(body) {
+    // 10-29：thinking 是 DeepSeek/千问关思考用的字段，Gemini 的 OpenAI 兼容接口不认，发过去会 400，去掉
+    const send = /generativelanguage\.googleapis\.com/.test(this.config.baseUrl) ? (({ thinking, ...rest }) => rest)(body) : body;
     return fetch(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(send),
       signal: AbortSignal.timeout(this.config.timeoutMs)
     });
   }

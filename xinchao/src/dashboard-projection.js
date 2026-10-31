@@ -3,7 +3,9 @@
 
 import { AXES, moodOf } from './core-axes.js';
 import { recentMarks } from './emotion-marks.js';
-import { DIMENSIONS, DRIVE_KEYS, DRIVE_SHORT } from './dimensions.js';
+import { DIMENSIONS, DRIVE_KEYS, DRIVE_SHORT, driveLevel } from './dimensions.js';
+import { driveTrend } from './engine.js';
+import { driveSub } from './mixed-feelings.js';
 import { buildConnectionDiagnostics } from './connection-diagnostics.js';
 import { emotionSummary } from './emotion.js';
 import { awarenessSummary } from './awareness.js';
@@ -19,26 +21,38 @@ function validDate(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-function driveLevel(value) {
+function driveLevel_(value) {
   if (value >= 0.75) return 'surging';
   if (value >= 0.5) return 'rising';
   if (value >= 0.25) return 'present';
   return 'quiet';
 }
 
-function projectedDrives(state) {
+function projectedDrives(state, now = new Date()) {
+  const trail = Array.isArray(state?.driveTrail) ? state.driveTrail.slice(-48) : [];
   return DRIVE_KEYS.map((key) => {
     const value = Number(clamp(state?.drives?.[key]).toFixed(4));
+    // 10-31 网页花瓣（4.3）：两小时涨落（涌/涨/平/落/静，和【心潮·此刻】同一个算法）、细项（吃醋、心疼…，没有真实事件就 null）、
+    // 刚被满足的饱足平台（until 之前不涨）、过去 24 小时的起伏（driveTrail 里这一股的 48 个点）。旧网页不认这几个字段，照旧只画高度。
+    let trend = null; let sub = null;
+    try { trend = projectedLevel(key, value, driveTrend(state, key, now)); } catch { /* 算不出就不给 */ }
+    try { sub = trend && trend !== '静' ? (driveSub(state, key, now) || null) : null; } catch { /* */ }
+    const until = Date.parse(state?.satisfactionPlateaus?.[key]?.until ?? '');
     return {
       key,
       label: DIMENSIONS[key].label,
       short: DRIVE_SHORT[key] ?? null,   // 10-03 网页花瓣用的短名（想她、牵挂…），跟心潮这一份走
       value,
       percent: Math.round(value * 100),
-      level: driveLevel(value),
+      level: driveLevel_(value),
+      trend,
+      sub: typeof sub === 'string' ? sub : sub?.label ?? null,
+      satiety: Number.isFinite(until) && until > now.getTime() ? { until: new Date(until).toISOString() } : null,
+      trail: trail.map((p) => ({ at: validDate(p?.at), v: Number(clamp(p?.drives?.[key]).toFixed(3)) })).filter((p) => p.at),
     };
   });
 }
+function projectedLevel(key, value, delta) { return driveLevel(key, value, delta); }
 
 function projectedThoughts(state, includePrivateText = false) {
   const flash = Array.isArray(state?.thoughtPool?.flash) ? state.thoughtPool.flash : [];
@@ -140,7 +154,7 @@ function projectedPersonality(core = {}, config = {}) {
 
 export function buildDashboardSnapshot(state = {}, config = {}, now = new Date(), personalityCore = {}) {
   const generatedAt = new Date(now);
-  const drives = projectedDrives(state);
+  const drives = projectedDrives(state, generatedAt);
   const lastPresenceAt = validDate(state.lastHeartbeatAt ?? state.lastConversationAt);
   const lastPresenceMs = Date.parse(lastPresenceAt ?? '');
   const idleMinutes = Number.isFinite(lastPresenceMs)
