@@ -150,7 +150,8 @@ export function emotionTarget(drives = {}) {
 }
 
 // 一次脉冲：事件砸出来的水花。带惯性——已经很高兴时再高兴一点，比从低落爬上来推得少。
-export function applyEmotionImpulse(state, impulse = {}, cause = '', now = new Date()) {
+// why（4.4）：起因的细项（被冷落是吃醋 / 被晾着 / 被忘），开了 EMOTION_LABEL_BASIS 时「此刻」里「刚才被冷落」后面跟着它
+export function applyEmotionImpulse(state, impulse = {}, cause = '', now = new Date(), why = '') {
   const emotion = ensureEmotion(state, now);
   const dv = clamp(Number(impulse.valence) || 0, -IMPULSE_CAP, IMPULSE_CAP);
   const da = clamp(Number(impulse.arousal) || 0, -IMPULSE_CAP, IMPULSE_CAP);
@@ -165,6 +166,7 @@ export function applyEmotionImpulse(state, impulse = {}, cause = '', now = new D
   if (cause) {
     emotion.lastCause = String(cause).slice(0, 80);
     emotion.lastCauseAt = iso(now);
+    emotion.lastCauseWhy = why ? String(why).replace(/\s+/g, ' ').trim().slice(0, 30) : null;
   }
   const changed = emotion.valence !== before.valence || emotion.arousal !== before.arousal;
   holdCause(state, now);
@@ -213,6 +215,7 @@ export function emotionSummary(state, now = new Date()) {
     updatedAt: emotion.updatedAt ?? null,
     lastCause: emotion.lastCause ?? null,
     lastCauseAt: emotion.lastCauseAt ?? null,
+    lastCauseWhy: emotion.lastCauseWhy ?? null,
   };
 }
 

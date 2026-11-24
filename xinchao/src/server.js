@@ -33,7 +33,7 @@ import { boardEnabled, postBoardMessage, readBoardMessages } from './board-clien
 import { SYSTEM_VERSION } from './version.js';
 import { memoryConnectionState } from './connection-diagnostics.js';
 import { PersonalityStore, computePersonalityStats } from './personality-store.js';
-import { CallStateStore, DrivePromptStore, loadDrivePrompts, pickDrivePrompt } from './drive-prompts.js';
+import { CallStateStore, DrivePromptStore, loadDrivePrompts, pickDrivePrompt, readMutes, inCallNow } from './drive-prompts.js';
 import { DrivePool, moodOf, slotOf, splitHint, POOL_LOW } from './drive-pool.js';
 import { DRIVE_KEYS as DRIVE_KEY_LIST, DRIVE_SHORT, driveLevel } from './dimensions.js';
 import { bodyLine, computeVitals, normalizeOffset } from './pulse.js';
@@ -115,7 +115,7 @@ const attention = createAttentionWatch({
   rulesPath: process.env.ATTENTION_RULES_PATH ?? '/app/configs/attention-rules.json',
   statePath: pathJoin(pathDirname(config.statePath), 'attention.json'),
   readState: () => store.read(),
-  record: (event) => recordConversationEvent(event, 'attention'),
+  record: async (event) => { const why = config.emotionLabelBasis ? await slightedExempt() : ''; if (why) { log('attention_slighted_skipped', { why }); return null; } return recordConversationEvent(event, 'attention'); },
   log,
 });
 
@@ -297,12 +297,12 @@ async function runCycle() {
       }
       // 驱力提示（10-15）：不靠窗口里的保活闹钟，心潮自己按节奏递。先入队再记，入队失败不记（下轮再试）
       try {
-        const prompts = await loadDrivePrompts(config.bridge.drivePromptsPath);
+        const prompts = await loadDrivePrompts(config.bridge.drivePromptsPath, { toolCheck: config.bridge.drivePromptToolCheck });
         if (prompts) {
           const before = await drivePromptStore.read();
-          const pick = pickDrivePrompt(state, before, prompts, now, { timeZone: config.settle.timeZone, dayMax: config.bridge.drivePromptDayMax, nightMax: config.bridge.drivePromptNightMax, nightSkipChatMinutes: config.bridge.drivePromptNightSkipChatMinutes, minGapMinutes: config.bridge.drivePromptMinGapMinutes, presentSkipMinutes: config.bridge.drivePromptPresentSkipMinutes, call: await callStateStore.read(), busy: await attention.busyNow(now.getTime()) });
+          const pick = pickDrivePrompt(state, before, prompts, now, { timeZone: config.settle.timeZone, dayMax: config.bridge.drivePromptDayMax, nightMax: config.bridge.drivePromptNightMax, nightSkipChatMinutes: config.bridge.drivePromptNightSkipChatMinutes, minGapMinutes: config.bridge.drivePromptMinGapMinutes, presentSkipMinutes: config.bridge.drivePromptPresentSkipMinutes, call: await callStateStore.read(), busy: await attention.busyNow(now.getTime()), totalMax: config.bridge.drivePromptTotalMax, nightStart: config.bridge.drivePromptNightStart, nightEnd: config.bridge.drivePromptNightEnd, nightSkipKinds: config.bridge.drivePromptNightSkipKinds, stashKeep: config.bridge.drivePromptStashKeep, callHoldAll: config.bridge.drivePromptCallHoldAll, slots: config.bridge.drivePromptSlots, escalateHours: config.bridge.drivePromptEscalateHours, sleepCallHold: new Set(config.bridge.drivePromptSleepCallHold), sleepCallIsNight: config.bridge.drivePromptSleepCallIsNight });
           // 10-26 念头罐：开头那句从「这股劲儿 × 这个时段」那罐里抽（同心情优先），抽不到就用话术原句；快见底就后台续罐
-          if (pick.text && pick.drive && !pick.summary && config.bridge.drivePoolEnabled) {
+          if (pick.text && pick.drive && !pick.summary && config.bridge.drivePoolEnabled && !prompts.actions?.[pick.drive]) {   // 4.4：有行动池的股开头只报哪股多满，不再从念头罐抽感觉句
             const { head } = splitHint(prompts.hints[pick.drive]);
             if (head) {
               const slot = slotOf(localDayAndHour(now, config.settle.timeZone).hour);
@@ -989,6 +989,19 @@ function interactionRules() {
   return rulesCache.rules;
 }
 const recentClassified = [];   // 最近判过的类型（只在内存里，给「刚亲近完」「被晾着要有前文」这几道门用）
+// 4.4 情绪标签带依据（EMOTION_LABEL_BASIS）：这些时候不判「被冷落」——她在通话里；她在忙（注意力监测里说了跟谁在一起）；
+// drive-mute.json 里有「冷落」（宿主写）；AI 3 小时内回她时说过「不用回」这类话。
+let axesShownDay = '';   // 底色一周没动时，今天在「此刻」里出过没有（只在内存，重启了多出一次无妨）
+const NO_REPLY_RE = /不用回|不必回|别回了|先忙你的|你先忙/;
+const NO_REPLY_HOLD_MS = 3 * 3_600_000;
+let noReplyAt = 0;
+async function slightedExempt(nowMs = Date.now()) {
+  try { if (inCallNow(await callStateStore.read(), nowMs)) return 'call'; } catch { /* 读不到通话状态就当不在通话 */ }
+  if (await attention.busyNow(nowMs)) return 'busy';
+  if ((await readMutes(pathDirname(config.bridge.drivePromptsPath), nowMs)).includes('冷落')) return 'muted';
+  if (nowMs - noReplyAt < NO_REPLY_HOLD_MS) return 'told_no_reply';
+  return '';
+}
 const MARK_TYPES = new Set(['affection', 'intimacy', 'empathy', 'loss', 'conflict', 'slighted']);
 
 async function classifyExchange(event, source = 'api') {
@@ -999,6 +1012,7 @@ async function classifyExchange(event, source = 'api') {
   delete event.exchange;
   // 09-28 和好两道关：留下她那句（≤80 字）给引擎核对有没有明确松口；只在内存里过这一跳，不落盘
   if (exchange && !event.herWords && !event.her_words) event.herWords = (exchange.match(/她说：(.+?)(?:\s*他回：|$)/)?.[1] ?? exchange).trim().slice(0, 80);
+  if (config.emotionLabelBasis && NO_REPLY_RE.test(exchange.match(/他回：(.+)$/)?.[1] ?? '')) noReplyAt = Date.now();
   if (event.interactionType || !exchange || !config.model.enabled) return null;
   const snapshot = await store.read();
   const lastAt = Date.parse(snapshot.interactionClassifyAt ?? '');
@@ -1009,7 +1023,8 @@ async function classifyExchange(event, source = 'api') {
     const { her } = splitExchange(exchange);
     const nowMs = Date.now();
     while (recentClassified.length && nowMs - recentClassified[0].at > 30 * 60_000) recentClassified.shift();
-    const tag = guardTag(raw, her, { rules: interactionRules(), recent: [...recentClassified], hasGrudge: Boolean(snapshot.grudge), now: nowMs });
+    let tag = guardTag(raw, her, { rules: interactionRules(), recent: [...recentClassified], hasGrudge: Boolean(snapshot.grudge), now: nowMs });
+    if (config.emotionLabelBasis && tag.type === 'slighted') { const why = await slightedExempt(nowMs); if (why) tag = { ...tag, type: 'companionship', sub: null, guarded: `slighted_${why}` }; }
     recentClassified.push({ type: tag.type, at: nowMs });
     while (recentClassified.length > 3) recentClassified.shift();
     event.interactionType = tag.type;
@@ -1590,7 +1605,9 @@ const server = createServer(async (request, response) => {
       let boxStale = 0;
       try { boxCount = await blackBox.count(new Date()); const surf = await blackBox.surfaced(new Date()); boxSurfaced = surf.length; boxSurfacedIds = surf.map((x) => x.id); boxStale = (await blackBox.stale(new Date())).length; } catch { boxCount = 0; }
       const now = new Date();
-      return send(response, 200, buildNowCompact(state, now, { timeZone: config.settle.timeZone, boxCount, boxSurfaced, boxSurfacedIds, boxStale, awarenessReviewWeekday: config.awareness.reviewWeekday, body: config.pulse.enabled ? bodyLine(vitalsNow(state, now)) : '', extra: nowLines.texts(now.getTime()) }));
+      const built = buildNowCompact(state, now, { timeZone: config.settle.timeZone, boxCount, boxSurfaced, boxSurfacedIds, boxStale, awarenessReviewWeekday: config.awareness.reviewWeekday, body: config.pulse.enabled ? bodyLine(vitalsNow(state, now)) : '', extra: nowLines.texts(now.getTime()) , labelBasis: config.emotionLabelBasis, axesSeenToday: config.emotionLabelBasis && axesShownDay === localDayAndHour(now, config.settle.timeZone).day });
+      if (config.emotionLabelBasis && built.ok && built.text.includes('底色：')) axesShownDay = localDayAndHour(now, config.settle.timeZone).day;
+      return send(response, 200, built);
     }
     if (request.method === 'GET' && url.pathname === '/v1/context') {
       if (!config.context.enabled) return send(response, 503, { error: 'context envelope disabled' });

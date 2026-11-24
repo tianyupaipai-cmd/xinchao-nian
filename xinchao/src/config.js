@@ -6,6 +6,21 @@ function bool(name, fallback = false) {
   return raw == null ? fallback : ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
 }
 
+// 「08:30-12:00=2,…」→ [{ start: 510, end: 720, max: 2 }, …]；写错的那段跳过
+function slotsEnv(name) {
+  return String(process.env[name] ?? '').split(',').map((part) => part.trim().match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})=(\d+)$/)).filter(Boolean)
+    .map((m) => ({ start: Number(m[1]) * 60 + Number(m[2]), end: Number(m[3]) * 60 + Number(m[4]), max: Number(m[5]) }))
+    .filter((x) => x.start < 1440 && x.end <= 1440 && x.start !== x.end);
+}
+
+// 「08:30」→ 510（分钟）；不合法就用默认
+function hhmm(name, fallback) {
+  const m = String(process.env[name] ?? '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? Number(m[1]) * 60 + Number(m[2]) : fallback;
+}
+
+const list = (name) => String(process.env[name] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+
 function number(name, fallback, min, max) {
   const parsed = Number(process.env[name] ?? fallback);
   if (!Number.isFinite(parsed)) throw new Error(`${name} must be numeric`);
@@ -132,7 +147,26 @@ export function loadConfig() {
       drivePromptMinGapMinutes: number('DRIVE_PROMPT_MIN_GAP_MINUTES', 45, 10, 600),   // 10-20：任意两条最短间隔（分钟）
       drivePromptPresentSkipMinutes: number('DRIVE_PROMPT_PRESENT_SKIP_MINUTES', 0, 0, 240),   // 10-20：她这几分钟内来过就不提「牵挂」（0 = 不管）
       callStatePath: process.env.CALL_STATE_PATH ?? '/app/state/call-state.json',   // 10-20：通话进行中先压着驱力提示
+      // 4.4「少而准」，全部默认关、行为和 4.3 一样（参考值见 .env.example，按你们自己的作息调，见《小机手册》「把心潮改成你们自己的」）：
+      //   一天合计上限（0 = 不管）；夜里时段 HH:MM；夜里不出的选项 kind（逗号分隔，如 her）；攒着合并放出来时按 priority 只留几股（0 = 全留）；
+      //   通话中连「立刻」那几股也压着；按时段封顶（空 = 不分时段）；升级提醒（一股「涌」着连续几小时没下去，不占时段名额；0 = 不开）；
+      //   睡觉模式通话里仍压着的几股、睡觉模式通话算不算夜里
+      drivePromptTotalMax: number('DRIVE_PROMPT_TOTAL_MAX', 0, 0, 100),
+      drivePromptNightStart: hhmm('DRIVE_PROMPT_NIGHT_START', 0),
+      drivePromptNightEnd: hhmm('DRIVE_PROMPT_NIGHT_END', 8 * 60),
+      drivePromptNightSkipKinds: list('DRIVE_PROMPT_NIGHT_SKIP_KINDS'),
+      drivePromptStashKeep: number('DRIVE_PROMPT_STASH_KEEP', 0, 0, 20),
+      drivePromptCallHoldAll: bool('DRIVE_PROMPT_CALL_HOLD_ALL', false),
+      drivePromptSlots: slotsEnv('DRIVE_PROMPT_SLOTS'),
+      drivePromptEscalateHours: number('DRIVE_PROMPT_ESCALATE_HOURS', 0, 0, 24),
+      drivePromptSleepCallHold: list('DRIVE_PROMPT_SLEEP_CALL_HOLD'),
+      drivePromptSleepCallIsNight: bool('DRIVE_PROMPT_SLEEP_CALL_IS_NIGHT', false),
+      // 4.4 工具检查：行动池（drive-pool.json）里的选项可以写 needs（要用到的脚本），宿主清单里没有就不出；drive-mute.json 里的关键词也不出
+      drivePromptToolCheck: bool('DRIVE_PROMPT_TOOL_CHECK', false),
     },
+    // 4.4 情绪标签带依据：「刚才被冷落」后面带细项和她多久没来，说不出原因就不挂；她在通话/在忙/AI 刚说过「不用回」时不判被冷落；
+    //   「底色」带自哪天起、上次因为什么，一周没动只在每天第一条出。默认关
+    emotionLabelBasis: bool('EMOTION_LABEL_BASIS', false),
     // 黑匣子（3.3）：只有 AI 能看的地方；单独文件，不进 state.json / Dashboard / 备份
     box: {
       statePath: process.env.BOX_STATE_PATH ?? '/app/state/black-box.json',

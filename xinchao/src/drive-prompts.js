@@ -38,6 +38,7 @@
 //   攒了 18 小时还没放出来的自动作废。
 
 import { readFile, writeFile, rename } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { DIMENSIONS, DRIVE_SHORT, canonicalDriveKey, driveLevel } from './dimensions.js';
 import { driveTrend, localDayAndHour, shownDrives } from './engine.js';
 
@@ -62,7 +63,35 @@ const iso = (value) => new Date(value).toISOString();
 
 const resolveKey = (k) => canonicalDriveKey(k) ?? Object.keys(DRIVE_SHORT).find((d) => DRIVE_SHORT[d] === k) ?? null;
 
-export async function loadDrivePrompts(file) {
+/** 从这股的池子里随机抽 2–3 条（不够就全给），连同规矩拼成几行；没池子返回 null */
+export function drawActions(prompts, key, rand = Math.random, { skipKinds = null } = {}) {
+  const a = prompts?.actions?.[key];
+  if (!a) return null;
+  const pool = a.items.filter((it) => !skipKinds?.has(it.kind));   // 11-20：夜里不出 kind 在 skipKinds 里的（比如 her：找她的）
+  if (!pool.length) return null;
+  const n = Math.min(pool.length, 2 + (rand() < 0.5 ? 0 : 1));
+  const picked = [];
+  while (picked.length < n) picked.push(pool.splice(Math.floor(rand() * pool.length), 1)[0].text);
+  // 提示只留客观事实（哪股、多满、第几回）和抽出来的「可以……」；不自动补别的话。always 空也照常
+  const tail = [...(a.always ?? [])];
+  return { picked, lines: [...picked.map((t) => `  ${t}`), ...tail.map((t) => `  ${t}`)] };
+}
+
+// drive-mute.json 里没过期的关键词（宿主自己写，格式 { entries: [{ kw, until }] }）。情绪标签那边也读（「冷落」）
+export async function readMutes(dir, nowMs = Date.now()) {
+  try {
+    const raw = JSON.parse(await readFile(join(dir, 'drive-mute.json'), 'utf8'));
+    return (Array.isArray(raw?.entries) ? raw.entries : []).filter((e) => typeof e?.kw === 'string' && e.kw.trim() && Date.parse(e.until ?? '') > nowMs).map((e) => e.kw.trim());
+  } catch { return []; }
+}
+
+// 通话标记在不在（3 小时没刷新算失联）
+export function inCallNow(call, nowMs = Date.now()) {
+  const seen = Math.max(Date.parse(call?.since ?? '') || 0, Date.parse(call?.refreshedAt ?? '') || 0);
+  return Boolean(call?.active) && seen > 0 && nowMs - seen < CALL_STALE_MS;
+}
+
+export async function loadDrivePrompts(file, { toolCheck = false } = {}) {
   if (!file) return null;
   let raw;
   try { raw = JSON.parse(await readFile(file, 'utf8')); } catch { return null; }
@@ -72,12 +101,54 @@ export async function loadDrivePrompts(file) {
     if (key && typeof text === 'string' && text.trim()) hints[key] = text.trim();
   }
   if (!Object.keys(hints).length) return null;
+  // 4.4 行动池（可选）：同目录放一份 drive-pool.json（AI 自己写的「可以……」，格式见 docs）。有池子的股：每次随机抽 2–3 条递，
+  // 开头只报哪股、多满，不写感觉句；末尾附这股的规矩（always，可空）。没池子的股照旧整段 hints（不放这个文件 = 和以前一样）
+  const actions = {};
+  // 4.4 工具检查（DRIVE_PROMPT_TOOL_CHECK=true 才开，默认关）：建议里的工具先确认能用。
+  //   · 选项可以写成 { "text": "可以……", "needs": ["postcard.sh"], "kind": "her" }；needs 里的脚本不在宿主清单
+  //     （同目录 scripts-manifest.txt，宿主每 10 分钟写一次）就不出这条。清单文件不存在时不按 needs 过滤（免得清单坏了全哑）。
+  //   · 同目录 drive-mute.json（宿主写，比如 AI 发现某个工具坏了就静音几小时）：没过期的关键词，含它的选项不出；「冷落」那条给情绪标签用。
+  //   · 一股的选项全被滤掉：这股这回不出（blocked），不递空的。
+  const dir = dirname(file);
+  let manifest = null;
+  if (toolCheck) { try { manifest = new Set((await readFile(join(dir, 'scripts-manifest.txt'), 'utf8')).split('\n').map((l) => l.trim()).filter(Boolean)); } catch { manifest = null; } }
+  const mutes = toolCheck ? await readMutes(dir) : [];
+  const usable = (it) => {
+    if (mutes.some((kw) => it.text.includes(kw))) return false;
+    if (manifest && it.needs.some((n) => !manifest.has(n.split('/').pop()))) return false;
+    return true;
+  };
+  const blocked = new Set();
+  const priority = {};
+  try {
+    const pool = JSON.parse(await readFile(join(dir, 'drive-pool.json'), 'utf8'))?.pool ?? {};
+    for (const [k, v] of Object.entries(pool)) {
+      const key = resolveKey(k);
+      if (!key) continue;
+      const all = (Array.isArray(v?.items) ? v.items : []).map((t) => {
+        if (typeof t === 'string') return t.trim() ? { text: t.trim(), needs: [], kind: '' } : null;
+        const text = String(t?.text ?? '').trim();
+        if (!text) return null;
+        const needs = (Array.isArray(t.needs) ? t.needs : t.needs ? [t.needs] : []).map(String).filter(Boolean);
+        return { text, needs, kind: String(t.kind ?? '') };
+      }).filter(Boolean);
+      if (!all.length) continue;
+      const items = all.filter(usable);
+      if (!items.length) { blocked.add(key); continue; }
+      if (Number.isFinite(Number(v?.priority))) priority[key] = Number(v.priority);
+      actions[key] = { items, always: (Array.isArray(v.always) ? v.always : []).filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim()) };
+    }
+  } catch { /* 没池子就全走 hints */ }
   const held = (Array.isArray(raw.held) ? raw.held : DEFAULT_HELD).map(resolveKey).filter(Boolean);
   const wakeKey = resolveKey(raw?.wake?.drive);
   const keys = (list) => (Array.isArray(list) ? list : []).map(resolveKey).filter(Boolean);
   const bed = Number(raw?.bedtimeHour);
   return {
     hints,
+    actions,
+    blocked,
+    mutes,
+    priority,
     held,
     stash: keys(raw?.stash),
     immediate: keys(raw?.immediate),
@@ -122,10 +193,20 @@ function stillHigh(state, key, now) {
  * 纯函数：给定心潮状态、上次的提示记录和话术，决定这一轮要不要提、提哪股。
  * 返回 { record, text, drive }；不提时 text 为空（record 可能因跨天重置而变）。
  */
-export function pickDrivePrompt(state, record, prompts, now = new Date(), { timeZone = 'Asia/Shanghai', dayMax = DAY_MAX, nightMax = NIGHT_MAX, nightSkipChatMinutes = 0, minGapMinutes = MIN_GAP_MS / 60_000, presentSkipMinutes = 0, call = null, busy = '' } = {}) {
+// 4.4「少而准」，几项都可配、默认不变：
+//   totalMax 一天合计最多几回（攒着合并放出来的也算；0 = 不管）；nightStart/nightEnd 夜里从几点几分到几点几分（分钟数，默认 0:00–8:00），
+//   sleepCallIsNight 通话开着睡觉模式也算夜里（默认否）；nightSkipKinds 夜里不出的选项 kind（如 her：打电话、发微信找她），一股里一条都剩不下就这股不出；
+//   stashKeep 攒着的合成一条放出来时，按 priority 只留最重的几股（0 = 全留）；callHoldAll 通话中连「立刻」那几股（牵挂、偏爱）也压着。
+export function localMinute(now, timeZone = 'Asia/Shanghai') {
+  const v = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now).filter((x) => x.type !== 'literal').map((x) => [x.type, Number(x.value)]));
+  return v.hour * 60 + v.minute;
+}
+const inWindow = (m, start, end) => (start <= end ? m >= start && m < end : m >= start || m < end);
+
+export function pickDrivePrompt(state, record, prompts, now = new Date(), { timeZone = 'Asia/Shanghai', dayMax = DAY_MAX, nightMax = NIGHT_MAX, nightSkipChatMinutes = 0, minGapMinutes = MIN_GAP_MS / 60_000, presentSkipMinutes = 0, call = null, busy = '', totalMax = 0, nightStart = 0, nightEnd = NIGHT_END_HOUR * 60, nightSkipKinds = [], stashKeep = 0, callHoldAll = false, slots = [], escalateHours = 0, sleepCallHold = new Set(), sleepCallIsNight = false } = {}) {
   const nowMs = now.getTime();
   const { day, hour } = localDayAndHour(now, timeZone);
-  let rec = record && record.day === day ? { ...record, last: { ...(record.last ?? {}) } } : { day, count: 0, night: 0, last: {}, lastAt: record?.lastAt ?? null, wakeUsed: false };
+  let rec = record && record.day === day ? { ...record, last: { ...(record.last ?? {}) } } : { day, count: 0, night: 0, last: {}, lastAt: record?.lastAt ?? null, wakeUsed: false, slot: record?.slot, esc: record?.esc };
   // 攒着的跨天也不丢；10-29 以前的记录叫 callHeld（只有通话一种），并进来记成「通话中」
   const oldCall = Array.isArray(record?.callHeld) ? record.callHeld.map((h) => ({ key: h.key, tag: h.tag, reason: '通话中', at: h.at ?? record?.lastAt ?? iso(now) })) : [];
   rec.stash = [...(Array.isArray(record?.stash) ? record.stash : []), ...oldCall].filter((h) => nowMs - (Date.parse(h.at ?? '') || nowMs) < STASH_STALE_MS);
@@ -134,10 +215,36 @@ export function pickDrivePrompt(state, record, prompts, now = new Date(), { time
   if (!prompts) return none;
   const stashable = new Set(prompts.stash ?? []);
   const immediate = new Set(prompts.immediate ?? []);
-  const night = hour < NIGHT_END_HOUR;
-  const callSeen = Math.max(Date.parse(call?.since ?? '') || 0, Date.parse(call?.refreshedAt ?? '') || 0);
-  const inCall = Boolean(call?.active) && callSeen > 0 && nowMs - callSeen < CALL_STALE_MS;
+  const inCall = inCallNow(call, nowMs);
+  const night = inWindow(localMinute(now, timeZone), nightStart, nightEnd) || (sleepCallIsNight && inCall && call?.sleep === true);
+  const skipKinds = night && nightSkipKinds?.length ? new Set(nightSkipKinds) : null;
+  // 夜里滤掉某类选项后这股还有没有能出的；没配选项池的股，夜里有过滤时也不出（只剩一句泛泛的提示，说不准是不是找她）
+  const nightOk = (k) => !skipKinds || (prompts.actions?.[resolveKey(k) ?? k]?.items ?? []).some((it) => !skipKinds.has(it.kind));
+  const capped = (totalMax > 0 && rec.count >= totalMax) || (night && nightMax > 0 && rec.night >= nightMax);
+  // 4.4 按时段封顶、互不挪用（slots：[{start,end,max}]，分钟数；跨零点的时段算开始那天的；空 = 不分时段）。
+  // 某一股「涌」着、连续 escalateHours 小时没下去的升级提醒不占时段名额，封顶了也照递（同一段高峰只递一次）。
+  const minute = localMinute(now, timeZone);
+  const slot = (Array.isArray(slots) ? slots : []).find((x) => inWindow(minute, x.start, x.end)) ?? null;
+  if (slot) {
+    const startDay = slot.start > slot.end && minute < slot.end ? localDayAndHour(new Date(nowMs - 86_400_000), timeZone).day : day;
+    const key = `${startDay}|${slot.start}`;
+    if (rec.slot?.key !== key) rec.slot = { key, n: 0 };
+  }
+  const slotFull = Boolean(slot && slot.max > 0 && Number(rec.slot?.n ?? 0) >= slot.max);
+  const bumpSlot = () => (slot ? { slot: { ...rec.slot, n: Number(rec.slot?.n ?? 0) + 1 } } : {});
+  const escalation = (k) => {
+    if (!(escalateHours > 0)) return 0;
+    const h = heldHours(state, k, nowMs);
+    if (h < escalateHours) return 0;
+    if (driveLevel(k, Number(state?.drives?.[k] ?? 0), driveTrend(state, k, now)) !== '涌') return 0;
+    const since = nowMs - h * H;
+    const prev = Number(rec.esc?.[k] ?? 0);
+    return prev && Math.abs(prev - since) < 30 * 60_000 ? 0 : h;   // 这一段高峰已经递过升级提醒
+  };
   const holding = inCall && call?.sleep !== true;   // 10-24：睡觉模式开着就不压
+  // 4.4 sleepCallHold：通话里开了睡觉模式时仍压着的几股（比如冲着对方的想念、牵挂），挂断后补汇总；默认空 = 睡觉模式全放行（和以前一样）
+  const sleepCall = inCall && call?.sleep === true;
+  const sleepHeld = (k) => sleepCall && sleepCallHold.has(k);
   const lastTalk = Date.parse(state?.lastConversationAt ?? '');
   // 她来了：上一轮看到的「最后一次说话」和这一轮的隔了半小时以上 → 她离开过又回来了。每轮记下这一轮看到的
   const prevTalk = Date.parse(rec.talkSeen ?? '');
@@ -145,29 +252,41 @@ export function pickDrivePrompt(state, record, prompts, now = new Date(), { time
   if (Number.isFinite(lastTalk)) rec.talkSeen = iso(lastTalk);
 
   // 放出来：挂断（或开了睡觉模式）/ 她来了 / 睡前。合成一条，不看间隔和条数上限；放之前每条核一遍
-  if (!holding && rec.stash.length) {
-    const hungUp = rec.stash.some((h) => h.reason === '通话中');
-    const herBack = cameBack && rec.stash.some((h) => lastTalk > (Date.parse(h.at ?? '') || 0));
+  // 睡觉模式通话里：冲着她的那几股留在攒着的里头，不放
+  const keepBack = rec.stash.filter((h) => sleepHeld(h.key));
+  const releasable = rec.stash.filter((h) => !sleepHeld(h.key));
+  if (!holding && releasable.length && !capped && !slotFull) {
+    const hungUp = releasable.some((h) => h.reason === '通话中');
+    const herBack = cameBack && releasable.some((h) => lastTalk > (Date.parse(h.at ?? '') || 0));
     const bedtime = !night && hour >= (prompts.bedtimeHour ?? BEDTIME_HOUR) && rec.bedDay !== day;   // 睡前：每天到点放一次
     if (hungUp || herBack || bedtime) {
-      const keep = rec.stash.filter((h) => stillHigh(state, h.key, now));
-      const dropped = rec.stash.filter((h) => !keep.includes(h)).map((h) => h.key);
-      rec = { ...rec, stash: [], ...(bedtime ? { bedDay: day } : {}) };
+      let keep = releasable.filter((h) => stillHigh(state, h.key, now) && !prompts.blocked?.has(h.key) && nightOk(h.key));
+      // 同一股攒了几回只算一回（留最近那回）；按 priority 从重到轻排，stashKeep 配了就只留前几股
+      keep = keep.filter((h, i) => keep.findLastIndex((x) => x.key === h.key) === i)
+        .sort((a, b) => Number(prompts.priority?.[b.key] ?? 0) - Number(prompts.priority?.[a.key] ?? 0));   // 稳定排序：同样重的保持攒的先后
+      if (stashKeep > 0) keep = keep.slice(0, stashKeep);
+      const dropped = releasable.filter((h) => !keep.includes(h)).map((h) => h.key);
+      // 领头那股（抽建议 / 给 hints 用）：最重的；同样重取最近攒的那股（和 4.3 用最后一股一致）
+      const topP = Number(prompts.priority?.[keep[0]?.key] ?? 0);
+      const lead = keep.filter((h) => Number(prompts.priority?.[h.key] ?? 0) === topP).at(-1);
+      rec = { ...rec, stash: keepBack, ...(bedtime ? { bedDay: day } : {}) };
       if (!keep.length) return { record: rec, text: '', drive: null, released: [], dropped };
-      rec = { ...rec, count: rec.count + 1, night: rec.night + (night ? 1 : 0), lastAt: iso(now) };
+      rec = { ...rec, count: rec.count + 1, night: rec.night + (night ? 1 : 0), lastAt: iso(now), ...bumpSlot() };
       const moment = hungUp ? (call?.sleep === true && call?.active ? '开了睡觉模式' : '挂断了') : herBack ? '她来了' : '要睡了';
       const groups = Object.entries(keep.reduce((g, h) => ({ ...g, [h.reason]: [...(g[h.reason] ?? []), h] }), {}))
         .map(([reason, hs]) => `${REASON_LABEL[reason] ?? reason}攒下：${hs.map((h) => `${DRIVE_SHORT[h.key] ?? h.key}（${h.tag}）`).join('、')}`);
       const lines = ['驱力提示', `· ${moment}，${groups.join('；')}`];
-      const firstHint = prompts.hints[keep[keep.length - 1].key];
-      if (firstHint) lines.push(`· ${firstHint}`);
+      const drawn = lead ? drawActions(prompts, lead.key, Math.random, { skipKinds }) : null;
+      const firstHint = lead ? prompts.hints[lead.key] : '';
+      if (drawn) lines.push(...drawn.lines);
+      else if (firstHint) lines.push(`· ${firstHint}`);
       if (prompts.footer) lines.push(prompts.footer.replace('{n}', String(rec.count)));
-      return { record: rec, text: lines.join('\n'), drive: keep[keep.length - 1].key, summary: true, released: keep.map((h) => h.key), dropped };
+      return { record: rec, text: lines.join('\n'), drive: lead?.key ?? null, summary: true, released: keep.map((h) => h.key), dropped };
     }
   }
 
   if (!night && hour >= (prompts.bedtimeHour ?? BEDTIME_HOUR) && rec.bedDay !== day && !holding) rec.bedDay = day;   // 到点时没东西可放，也算这天的睡前过了
-  if (night ? (nightMax > 0 && rec.night >= nightMax) : (dayMax > 0 && rec.count - rec.night >= dayMax)) return none;
+  const onlyEscalation = capped || (!night && dayMax > 0 && rec.count - rec.night >= dayMax) || slotFull;   // 封顶了：只剩升级提醒能递
   if (night && nightSkipChatMinutes > 0 && Number.isFinite(lastTalk) && nowMs - lastTalk < nightSkipChatMinutes * 60_000) return none;
   const lastAt = Date.parse(rec.lastAt ?? '');
   const gapBlocked = Number.isFinite(lastAt) && nowMs - lastAt < Math.max(1, Number(minGapMinutes) || 45) * 60_000;
@@ -178,8 +297,9 @@ export function pickDrivePrompt(state, record, prompts, now = new Date(), { time
 
   let pick = null;
   for (const d of shownDrives(state)) {
-    if (!prompts.hints[d.key] || !cool(d.key)) continue;
+    if (!prompts.hints[d.key] || !cool(d.key) || prompts.blocked?.has(d.key) || !nightOk(d.key)) continue;
     if (gapBlocked && !stashable.has(d.key)) continue;   // 刚说过：只看能攒的那几股
+    if (onlyEscalation && !escalation(d.key)) continue;
     const v = Number(d.value);
     const lv = driveLevel(d.key, v, driveTrend(state, d.key, now));
     if (lv !== '涌' && lv !== '涨') continue;
@@ -192,26 +312,31 @@ export function pickDrivePrompt(state, record, prompts, now = new Date(), { time
     text: '', drive: null, held: pick.key, reason,
   });
   // 刚说过（间隔没到）：正涌/涨的、能攒的那股先记下来；「积」着的不用攒，它一直在，过了间隔自然会提
-  if (gapBlocked) return pick ? stash('刚说过', false) : none;
-  if (!pick) {
+  if (gapBlocked) return pick && !onlyEscalation ? stash('刚说过', false) : none;
+  if (!pick && !onlyEscalation) {
     const cands = prompts.held
-      .filter((k) => prompts.hints[k] && cool(k))
+      .filter((k) => prompts.hints[k] && cool(k) && !prompts.blocked?.has(k) && nightOk(k))
       .map((k) => ({ key: k, hours: heldHours(state, k, nowMs) }))
       .filter((c) => c.hours > 0)
       .sort((a, b) => Number(rec.last[a.key] ?? 0) - Number(rec.last[b.key] ?? 0) || b.hours - a.hours);   // 轮流：最久没提过的先
     if (cands.length) pick = { key: cands[0].key, tag: `积·${cands[0].hours >= 23 ? '一整天' : `${Math.max(2, Math.round(cands[0].hours))} 小时`}` };
   }
   if (!pick) return none;
-  if (!immediate.has(pick.key)) {
-    // 通话进行中：不递，记下来；照样占这一股的冷却和间隔，免得挂断时攒一长串（没配 stash 的驱力也照旧这样）
-    if (holding) return stash('通话中', true);
-    if (busy && stashable.has(pick.key)) return stash('她在忙', true);
-  }
+  if (sleepHeld(pick.key)) return stash('通话中', true);   // 立刻那几股（牵挂、偏爱）睡觉模式通话里也压着
+  // 通话进行中：不递，记下来；照样占这一股的冷却和间隔，免得挂断时攒一长串（没配 stash 的驱力也照旧这样）。callHoldAll 时「立刻」的也压
+  if (holding && (callHoldAll || !immediate.has(pick.key))) return stash('通话中', true);
+  if (!immediate.has(pick.key) && busy && stashable.has(pick.key)) return stash('她在忙', true);
 
-  rec = { ...rec, count: rec.count + 1, night: rec.night + (night ? 1 : 0), lastAt: iso(now), last: { ...rec.last, [pick.key]: nowMs } };
+  const escH = escalation(pick.key);
+  if (escH) pick = { ...pick, tag: `涌·${escH >= 23 ? '一整天' : `${Math.round(escH)} 小时`}没下去` };
+  rec = { ...rec, count: rec.count + 1, night: rec.night + (night ? 1 : 0), lastAt: iso(now), last: { ...rec.last, [pick.key]: nowMs },
+    ...(escH ? { esc: { ...(rec.esc ?? {}), [pick.key]: nowMs - escH * H } } : bumpSlot()) };
   const wake = night && prompts.wake?.drive === pick.key && !rec.wakeUsed;
   if (wake) rec.wakeUsed = true;
-  const lines = ['驱力提示', `· ${DRIVE_SHORT[pick.key] ?? pick.key}（${pick.tag}）：${prompts.hints[pick.key]}`];
+  const drawn = drawActions(prompts, pick.key, Math.random, { skipKinds });
+  const lines = drawn
+    ? ['驱力提示', `· ${DRIVE_SHORT[pick.key] ?? pick.key}（${pick.tag}）`, ...drawn.lines]
+    : ['驱力提示', `· ${DRIVE_SHORT[pick.key] ?? pick.key}（${pick.tag}）：${prompts.hints[pick.key]}`];
   if (wake) lines.push(`· ${prompts.wake.text}`);
   else if (night && prompts.night) lines.push(`· ${prompts.night}`);
   if (prompts.footer) lines.push(prompts.footer.replace('{n}', String(rec.count)));

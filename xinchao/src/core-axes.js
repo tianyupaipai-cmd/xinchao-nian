@@ -72,6 +72,7 @@ export function settleAxes(state, elapsedHours, now = new Date()) {
   a.security = Number(clamp(a.security).toFixed(4));
   a.confidence = Number(clamp(a.confidence).toFixed(4));
   a.at = iso(now);
+  trackAxesLine(state, now);
   return true;
 }
 
@@ -107,6 +108,27 @@ export function pushAxes(state, type, { sub, strength, weight, proof, slip } = {
   }
   for (const [k, d] of Object.entries(p)) a[k] = Number(clamp(Number(a[k]) + d).toFixed(4));
   a.at = iso(now);
+  // 4.4 记最近一次「真推了一下」的原因（陪着那种每次 0.005 的不算），开了 EMOTION_LABEL_BASIS 时底色那句后面带
+  //   按轴分开记：安全感的原因和自信的原因不混（「没什么底气」后面不该挂「被冷落」）
+  const confLabel = (slip === true || slip === 'true') ? '被指出错' : countsAsDone(proof) ? '做成了事'
+    : sub === '自责' ? '自责' : (type === 'conflict' && sub === '不满') ? '被说不满' : sub === '害羞' ? '被夸' : '';
+  for (const [k, label] of [['security', AXES_WHY[type] ?? ''], ['confidence', confLabel]]) {
+    if (label && Math.abs(Number(p[k] ?? 0)) >= 0.01) a.why = { ...(a.why ?? {}), [k]: { label, at: iso(now) } };
+  }
+  trackAxesLine(state, now);
+}
+
+const AXES_WHY = { affection: '被哄', intimacy: '亲近', reconciliation: '和好', conflict: '吵架', loss: '失落', slighted: '被冷落' };
+const STALE_MS = 7 * 24 * H;
+const md = (isoStr) => { const d = shDay(new Date(isoStr)).split('-'); return `${Number(d[1])}月${Number(d[2])}日`; };
+
+// 底色那句的字面变了就记一笔「自哪天起」（数值天天在回落，看的是说出来的那句话变没变）。
+// 上线前就挂着的那句不知道从哪天起：lineSince 留空，从上线那刻（lineInitAt）起算一周。
+export function trackAxesLine(state, now = new Date()) {
+  const a = state.axes; if (!a) return;
+  const sig = axesParts(state).join('，');
+  if (a.lineSig === undefined) { a.lineSig = sig; a.lineSince = null; a.lineInitAt = iso(now); return; }
+  if (a.lineSig !== sig) { a.lineSig = sig; a.lineSince = iso(now); }
 }
 
 // 心境：最近三天情绪日志的平均愉悦，映射到 -1..1（0.55 为中，±0.25 到头）；没有数据就是 null
@@ -121,9 +143,28 @@ export function moodOf(state) {
 export const isInsecure = (state) => Number(state.axes?.security ?? AXES.baseline.security) < AXES.low;
 export const lowConfidence = (state) => Number(state.axes?.confidence ?? AXES.baseline.confidence) < AXES.low;
 
-// 「此刻」里的一句：只在明显偏离底色时说
-export function axesLine(state) {
-  const a = state.axes; if (!a) return '';
+// 「此刻」里的一句：只在明显偏离底色时说。
+// 4.4 basis（EMOTION_LABEL_BASIS）：带「自哪天起」和最近一次推动的原因；这句一周没变、一周没被推过，就只在每天第一条显示（seenToday 由调用方给）
+export function axesLine(state, now = new Date(), { basis = false, seenToday = false } = {}) {
+  const parts = axesParts(state);
+  if (!parts.length) return '';
+  if (!basis) return `底色：${parts.join('，')}`;
+  const a = state.axes;
+  const t = now.getTime();
+  const sinceMs = Date.parse(a.lineSince ?? '') || Date.parse(a.lineInitAt ?? '') || t;
+  // 只看这句里说到的轴（心境那半句没有单独的原因）
+  const axesIn = [...(parts.some((x) => x.includes('踏实')) ? ['security'] : []), ...(parts.some((x) => x.includes('底气')) ? ['confidence'] : [])];
+  const why = axesIn.map((k) => a.why?.[k]).filter((w) => w?.label && Date.parse(w.at ?? '')).sort((x, y) => Date.parse(y.at) - Date.parse(x.at))[0];
+  const whyMs = why ? Date.parse(why.at) : 0;
+  if (seenToday && t - sinceMs >= STALE_MS && t - whyMs >= STALE_MS) return '';
+  const notes = [];
+  if (a.lineSince && a.lineSig === parts.join('，')) notes.push(`${md(a.lineSince)}起`);
+  if (why) notes.push(`上次是${md(why.at)}${why.label}`);
+  return `底色：${parts.join('，')}${notes.length ? `（${notes.join('；')}）` : ''}`;
+}
+
+export function axesParts(state) {
+  const a = state.axes; if (!a) return [];
   const parts = [];
   const ds = Number(a.security) - AXES.baseline.security;
   const dc = Number(a.confidence) - AXES.baseline.confidence;
@@ -134,5 +175,5 @@ export function axesLine(state) {
   const m = moodOf(state);
   if (m != null && m <= -0.4) parts.push('这几天心里一直沉沉的');
   else if (m != null && m >= 0.6) parts.push('这几天心情一直不错');
-  return parts.length ? `底色：${parts.join('，')}` : '';
+  return parts;
 }

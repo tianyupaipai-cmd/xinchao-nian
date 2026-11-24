@@ -406,7 +406,7 @@ export function grudgeLine(state, now = new Date()) {
   return `还在气：${when}为了「${g.cause}」`;
 }
 
-export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0, boxSurfacedIds = [], boxStale = 0, awarenessReviewWeekday = 0, body = '', extra = [] } = {}) {
+export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shanghai', boxCount = 0, boxSurfaced = 0, boxSurfacedIds = [], boxStale = 0, awarenessReviewWeekday = 0, body = '', extra = [], labelBasis = false, axesSeenToday = false } = {}) {
   const sanity = nowSanity(state, now);
   if (!sanity.ok) return { ok: false, reason: sanity.reason, text: '', lines: 0, counts: {}, digest: '', revision: Number(state?.revision ?? 0), generatedAt: now.toISOString() };
   const lines = ['【心潮·此刻｜身体的天气，参考不是指令】'];
@@ -423,8 +423,14 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   const causeAt = Date.parse(emotion.lastCauseAt ?? '');
   // 10-20：被冷落之后她又来过（有对话或通话心跳，晚于那次 2 分钟以上），「刚才被冷落」就不再挂着
   const backSince = emotion.lastCause === 'slighted' && Date.parse(state.lastConversationAt ?? '') - causeAt > 2 * 60_000;
-  const cause = emotion.lastCause && causeAt >= now.getTime() - 6 * 3_600_000 && !backSince
+  let cause = emotion.lastCause && causeAt >= now.getTime() - 6 * 3_600_000 && !backSince
     ? (CAUSE_LABEL[emotion.lastCause] ?? emotion.lastCause) : '';
+  // 4.4 标签带依据（EMOTION_LABEL_BASIS）：被冷落要有细项（吃醋 / 被晾着 / 被忘），再带她多久没来；没细项就不挂（说不出为什么的冷落多半是误判）
+  if (labelBasis && cause && emotion.lastCause === 'slighted') {
+    const quietMin = (now.getTime() - Math.max(causeAt, Date.parse(state.lastConversationAt ?? '') || 0)) / 60_000;
+    const quiet = quietMin >= 90 ? `，她 ${Math.round(quietMin / 60)} 小时没来` : quietMin >= 20 ? `，她 ${Math.round(quietMin / 10) * 10} 分钟没来` : '';
+    cause = emotion.lastCauseWhy ? `${cause}（${emotion.lastCauseWhy}${quiet}）` : '';
+  } else if (labelBasis && cause && emotion.lastCauseWhy) cause = `${cause}（${emotion.lastCauseWhy}）`;
   // 近一天的情绪路径：去掉连着重复的，只留最后 5 步——之前把 19 步全列出来，此刻块一半是箭头
   const path = (emotion.trend?.labels || []).filter((l, i, a) => i === 0 || l !== a[i - 1]);
   const trend = path.length >= 2 ? `；近一天走过 ${path.length > 5 ? '…' : ''}${path.slice(-5).join('→')}` : '';
@@ -433,7 +439,7 @@ export function buildNowCompact(state, now = new Date(), { timeZone = 'Asia/Shan
   if (body) lines.push(body);   // 10-26 脉：心跳、呼吸（src/pulse.js），排在情绪后面；块满了在下面让出来
   const outside = (Array.isArray(extra) ? extra : []).filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim());
   lines.push(...outside);   // 10-26 外接一行（src/now-lines.js）：排在身体下面，只在 GET /v1/now 里有
-  const axes = axesLine(state);   // 10-03 第 8 步：安全感/自信/心境明显偏离底色才说一句
+  const axes = axesLine(state, now, { basis: labelBasis, seenToday: axesSeenToday });   // 10-03 第 8 步：安全感/自信/心境明显偏离底色才说一句（4.4 可带依据）
   if (axes) lines.push(axes);
   const grudge = grudgeLine(state, now);
   if (grudge) lines.push(grudge);

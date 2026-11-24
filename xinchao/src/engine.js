@@ -829,7 +829,7 @@ export function applyConversationEvent(input, event = {}, now = new Date(), opti
   const herOk = herRecovered(event.herWords ?? event.her_words ?? '') ? relieveHerGrieve(state, now, { ratio: HER_RELIEF.recovered }) : null;
   if (herOk?.affected?.length) interaction.herRecovered = herOk.drop;
   // 情绪层：互动事件打一次脉冲（和驱力效果同一道日限门），会话 tone 把情绪往落点拉一小段。
-  if (interaction.applied && INTERACTION_EMOTION[type]) applyEmotionImpulse(state, INTERACTION_EMOTION[type], type, now);
+  if (interaction.applied && INTERACTION_EMOTION[type]) applyEmotionImpulse(state, INTERACTION_EMOTION[type], type, now, event.sub ?? '');
   if (interaction.applied) lightEmotion(state, type, { sub: event.sub, closeness: event.closeness, strength: event.strength, proof: event.proof }, now);   // 10-02 情绪线：心动/害羞/得意/骄傲
   if (interaction.applied && (interaction.appliedAs ?? type) !== 'soothe') {   // 10-03 浮标：有起因的情绪记一笔，网页潮汐带用
     const mk = markFor(type, { sub: event.sub, strength: event.strength, closeness: event.closeness, proof: event.proof });
