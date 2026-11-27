@@ -154,7 +154,7 @@ DASHBOARD_ALLOWED_ORIGINS=https://xinchaomind.uk
 ```
 compose.yaml       两服务联合编排（共享网络、内部互通）
 .env.example       合并配置模板
-xinchao/           心潮源码（动态心智）—— AGPL-3.0
+xinchao/           心潮源码（动态心智）—— PolyForm Noncommercial 1.0.0（不得商用）
 ombre-brain/       Ombre Brain 源码（记忆库）—— 见 NOTICE / LICENSE
 bridge/            心潮念 Runtime Bridge（git 子模块）—— 用户主动互动的本地连接桥
 docs/              总入口、文档目录、平台网页接入、许可说明（4.0 文档放在 docs/4.0/）
@@ -186,12 +186,14 @@ AI Runtime。梦境、余韵、思念、内部状态与 AI 自主行动**不允�
 
 ## 许可证与署名
 
-- 仓库根的联合发行代码和 `xinchao/` 心潮引擎都是 AGPL-3.0（引擎与独立版 xinchao-dynamic-mind 一致，2026-11-27 起；此前以 MIT 发布的版本不受影响）。把心潮或改过的版本作为网络服务给别人用时，需要按 AGPL 公开对应源代码。
+- 仓库根的联合发行代码和 `xinchao/` 心潮引擎都采用 [PolyForm Noncommercial 1.0.0](LICENSE)（与独立版 xinchao-dynamic-mind 一致）：个人、学习、研究、非营利用途可以自由使用、修改和部署，**不得用于任何商业用途**。
+- **商用请联系作者获取商业授权**（在本仓库开 issue 说明用途即可）。`ombre-brain/` 等上游部分如要商用，请分别联系上游原作者取得授权。
+- 2026-11-27 起生效；此前以 MIT / AGPL-3.0 发布的版本，已经取得的授权不受影响。
 - `ombre-brain/`（Ombre Brain）：基于 P0luz 的 Ombre Brain 与 Yinglianchun 的 fork，
   **保留其原始许可证与署名**，见 [NOTICE](NOTICE)。本项目对其的修改记录见 `ombre-brain/MODIFICATIONS.md`。
 - 本融合项目**非纯 MIT**；商业使用需取得上游 OB 作者的书面许可。
 
-详细的分目录边界见 [许可说明](docs/LICENSING.md)。根目录的 AGPL 不会覆盖
+详细的分目录边界见 [许可说明](docs/LICENSING.md)。根目录的许可不会覆盖
 `ombre-brain/` 已有的上游非商业约束。
 
 > 详细边界见上游来源说明。融合不改变 OB 原生记忆库功能——breath/hold/grow/dream/trace/

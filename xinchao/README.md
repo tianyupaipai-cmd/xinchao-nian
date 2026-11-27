@@ -331,7 +331,7 @@ memory-data/     可选外部心跳挂载目录
 
 ## License
 
-[AGPL-3.0](LICENSE)（2026-11-27 起，与独立版 xinchao-dynamic-mind 一致；此前以 MIT 发布的版本不受影响）
+[PolyForm Noncommercial 1.0.0](LICENSE)：不得用于任何商业用途，**商用请联系作者获取商业授权**。2026-11-27 起生效，与独立版 xinchao-dynamic-mind 一致；此前以 MIT / AGPL-3.0 发布的版本不受影响。
 
 ## 联系
 
