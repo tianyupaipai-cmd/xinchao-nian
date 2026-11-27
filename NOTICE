@@ -6,7 +6,8 @@ Copyright (c) 2026 派派 / 顾川
 ────────────────────────────────────────────────
 1. 心潮（xinchao/ 目录）—— 动态心智引擎
    Copyright (c) 2026 派派
-   MIT License（见 xinchao/LICENSE）
+   AGPL-3.0（见 xinchao/LICENSE；与独立版 xinchao-dynamic-mind 一致）
+   自 2026-11-27 起改为 AGPL-3.0；在此之前以 MIT 发布的版本，已经取得的 MIT 授权不受影响。
 
 ────────────────────────────────────────────────
 2. Ombre Brain（ombre-brain/ 目录）—— 记忆库（衍生版本）

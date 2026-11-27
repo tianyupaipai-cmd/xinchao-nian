@@ -154,7 +154,7 @@ DASHBOARD_ALLOWED_ORIGINS=https://xinchaomind.uk
 ```
 compose.yaml       两服务联合编排（共享网络、内部互通）
 .env.example       合并配置模板
-xinchao/           心潮源码（动态心智）—— MIT
+xinchao/           心潮源码（动态心智）—— AGPL-3.0
 ombre-brain/       Ombre Brain 源码（记忆库）—— 见 NOTICE / LICENSE
 bridge/            心潮念 Runtime Bridge（git 子模块）—— 用户主动互动的本地连接桥
 docs/              总入口、文档目录、平台网页接入、许可说明（4.0 文档放在 docs/4.0/）
@@ -186,7 +186,7 @@ AI Runtime。梦境、余韵、思念、内部状态与 AI 自主行动**不允�
 
 ## 许可证与署名
 
-- 仓库根的联合发行代码标示为 AGPL-3.0；`xinchao/` 目录仍保留其 MIT 许可文件。
+- 仓库根的联合发行代码和 `xinchao/` 心潮引擎都是 AGPL-3.0（引擎与独立版 xinchao-dynamic-mind 一致，2026-11-27 起；此前以 MIT 发布的版本不受影响）。把心潮或改过的版本作为网络服务给别人用时，需要按 AGPL 公开对应源代码。
 - `ombre-brain/`（Ombre Brain）：基于 P0luz 的 Ombre Brain 与 Yinglianchun 的 fork，
   **保留其原始许可证与署名**，见 [NOTICE](NOTICE)。本项目对其的修改记录见 `ombre-brain/MODIFICATIONS.md`。
 - 本融合项目**非纯 MIT**；商业使用需取得上游 OB 作者的书面许可。

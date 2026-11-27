@@ -3,7 +3,7 @@
   "version": "4.4.0",
   "description": "Independent dynamic state engine with remote MCP, OAuth, short-term continuity and optional memory adapters.",
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test"

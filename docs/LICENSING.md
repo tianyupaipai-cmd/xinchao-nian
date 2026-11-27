@@ -5,7 +5,7 @@
 | 范围 | 来源 | 许可/约束 | 再分发要求 |
 | --- | --- | --- | --- |
 | 仓库根联合发行代码 | 心潮·念 | AGPL-3.0 | 保留许可并依 AGPL 提供对应源码 |
-| `xinchao/` | 心潮动态心智引擎 | MIT | 保留 `xinchao/LICENSE` 中的版权与许可声明 |
+| `xinchao/` | 心潮动态心智引擎 | AGPL-3.0（2026-11-27 起，与独立版一致；此前以 MIT 发布的版本不受影响） | 保留许可；作为网络服务提供时依 AGPL 提供对应源码 |
 | `bridge/` | xinchao-runtime-bridge 子模块 | MIT | 保留子模块自身许可 |
 | `ombre-brain/` 原始部分 | P0luz/Ombre-Brain | MIT | 保留 `LICENSE.P0luz-MIT` 与原始署名 |
 | `ombre-brain/` 二改及衍生部分 | CyberSealNull fork | 个人/学习/非商业 | 商用前需取得相关权利人书面许可 |
